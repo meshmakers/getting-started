@@ -1,0 +1,310 @@
+networks:
+  octo-internal:
+    driver: bridge
+    ipam:
+      config:
+          - subnet: 172.20.0.0/16
+volumes:
+  mongo-data0:
+  mongo-data1:
+  mongo-data2:
+  crate-data1:
+  crate-data2:
+  crate-data3:
+
+services:
+  mongo-2.mongo:
+    hostname: mongo-2.mongo
+    container_name: mongo-2.mongo
+    image: mongo:7.0.5
+    command: bash -c "chmod 400 /data/file.key && /usr/bin/mongod --keyFile /data/file.key --replSet rs --bind_ip_all" 
+    ports:
+      - "27018:27017"
+    restart: always
+    networks:
+      - octo-internal
+    volumes:
+      - "./file.key:/data/file.key"
+      - "mongo-data2:/data/db"
+
+  mongo-1.mongo:
+    hostname: mongo-1.mongo
+    container_name: mongo-1.mongo
+    image: mongo:7.0.5
+    command: bash -c "chmod 400 /data/file.key && /usr/bin/mongod --keyFile /data/file.key --replSet rs --bind_ip_all" 
+    ports:
+      - "27019:27017"
+    restart: always
+    networks:
+      - octo-internal
+    volumes:
+      - "./file.key:/data/file.key"
+      - "mongo-data1:/data/db"
+
+  mongo-0.mongo:
+    hostname: mongo-0.mongo
+    container_name: mongo-0.mongo
+    image: mongo:7.0.5
+    command: bash -c "chmod 400 /data/file.key && /usr/bin/mongod --keyFile /data/file.key --replSet rs --bind_ip_all" 
+    ports:
+      - "27017:27017"
+    links:
+      - mongo-1.mongo
+      - mongo-2.mongo
+    restart: always
+    networks:
+      - octo-internal
+    volumes:
+      - "./scripts/init-database.js:/scripts/init-database.js"
+      - "./scripts/create-admin-user.js:/scripts/create-admin-user.js"
+      - "./file.key:/data/file.key"
+      - "mongo-data0:/data/db"
+
+  rabbitmq:
+    container_name: rabbitmq
+    image: rabbitmq:3.12-management
+
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_DEFAULT_USER}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_DEFAULT_PASS}
+    networks:
+      - octo-internal
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    restart: always
+  cratedb01:
+    hostname: cratedb01
+    container_name: cratedb01
+    image: crate:latest
+    ports:
+      - "4201:4200"
+      - "5432:5432"
+    volumes:
+      - crate-data1:/data
+    command:
+      [
+        "crate",
+        "-Ccluster.name=crate-docker-cluster",
+        "-Cnode.name=cratedb01",
+        "-Cnode.data=true",
+        "-Cnetwork.host=_site_",
+        "-Cdiscovery.seed_hosts=cratedb02,cratedb03",
+        "-Ccluster.initial_master_nodes=cratedb01,cratedb02,cratedb03",
+        "-Cgateway.expected_data_nodes=3",
+        "-Cgateway.recover_after_data_nodes=2",
+      ]
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    environment:
+      - CRATE_HEAP_SIZE=2g
+
+  cratedb02:
+    hostname: cratedb02
+    container_name: cratedb02
+    image: crate:latest
+    ports:
+      - "4202:4200"
+      - "5433:5432"
+    volumes:
+      - crate-data2:/data
+    command:
+      [
+        "crate",
+        "-Ccluster.name=crate-docker-cluster",
+        "-Cnode.name=cratedb02",
+        "-Cnode.data=true",
+        "-Cnetwork.host=_site_",
+        "-Cdiscovery.seed_hosts=cratedb01,cratedb03",
+        "-Ccluster.initial_master_nodes=cratedb01,cratedb02,cratedb03",
+        "-Cgateway.expected_data_nodes=3",
+        "-Cgateway.recover_after_data_nodes=2",
+      ]
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    environment:
+      - CRATE_HEAP_SIZE=2g
+
+  cratedb03:
+    hostname: cratedb03
+    container_name: cratedb03
+    image: crate:latest
+    ports:
+      - "4203:4200"
+      - "5434:5432"
+    volumes:
+      - crate-data3:/data
+    command:
+      [
+        "crate",
+        "-Ccluster.name=crate-docker-cluster",
+        "-Cnode.name=cratedb03",
+        "-Cnode.data=true",
+        "-Cnetwork.host=_site_",
+        "-Cdiscovery.seed_hosts=cratedb01,cratedb02",
+        "-Ccluster.initial_master_nodes=cratedb01,cratedb02,cratedb03",
+        "-Cgateway.expected_data_nodes=3",
+        "-Cgateway.recover_after_data_nodes=2",
+      ]
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    environment:
+      - CRATE_HEAP_SIZE=2g
+    
+  octo-identity-services:
+    hostname: octo-identity-services
+    container_name: octo-identity-services
+    image: meshmakers/octo-mesh-identity-services:${OCTO_VERSION}
+    restart: always    
+    environment:
+      - OCTO_SYSTEM__DATABASEUSERPASSWORD=${USER_PASSWORD}
+      - OCTO_SYSTEM__ADMINUSERPASSWORD=${ADMIN_PASSWORD}
+      - OCTO_SYSTEM__DATABASEHOST=mongo-0.mongo:27017,mongo-1.mongo:27017,mongo-2.mongo:27017
+      - OCTO_IDENTITY__BROKERHOST=rabbitmq
+      - OCTO_IDENTITY__BROKERUSER=${RABBITMQ_DEFAULT_USER}
+      - OCTO_IDENTITY__BROKERPASSWORD=guest
+      - OCTO_IDENTITY__KeyFilePath=/etc/octo-identity/IdentityServer4Auth.pfx
+      - OCTO_IDENTITY__KEYFILEPASSWORD=mvf*vkm9ehe.hyr!KRA
+      - OCTO_IDENTITY__AUTHORITYURL=https://octo-identity-services:5003
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=https://+:5003
+      - ASPNETCORE_HTTPS_PORT=5003
+      - ASPNETCORE_Kestrel__Certificates__Default__Password=Secret01
+      - ASPNETCORE_Kestrel__Certificates__Default__Path=/etc/octo-identity/localhost_cert.pfx
+    ports:
+      - "5003:5003"
+    networks:
+      - octo-internal
+    volumes:
+      - "./IdentityServer4Auth.pfx:/etc/octo-identity/IdentityServer4Auth.pfx"
+      - "./localhost_cert.pfx:/etc/octo-identity/localhost_cert.pfx"
+      - "./localhost_cert.pem:/etc/ssl/certs/localhost_cert.pem"
+    links:
+      - rabbitmq
+      - mongo-0.mongo
+      - mongo-1.mongo
+      - mongo-2.mongo
+      
+  octo-asset-services:
+    hostname: octo-asset-rep-services
+    container_name: octo-asset-rep-services
+    image: meshmakers/octo-mesh-asset-rep-services:${OCTO_VERSION}
+    restart: always
+    environment:
+      - OCTO_SYSTEM__DATABASEUSERPASSWORD=${USER_PASSWORD}
+      - OCTO_SYSTEM__ADMINUSERPASSWORD=${ADMIN_PASSWORD}
+      - OCTO_SYSTEM__DATABASEHOST=mongo-0.mongo:27017,mongo-1.mongo:27017,mongo-2.mongo:27017
+      - OCTO_ASSETREPOSITORY__BROKERHOST=rabbitmq
+      - OCTO_ASSETREPOSITORY__BROKERUSER=${RABBITMQ_DEFAULT_USER}
+      - OCTO_ASSETREPOSITORY__BROKERPASSWORD=${RABBITMQ_DEFAULT_PASS}
+      - OCTO_ASSETREPOSITORY__AUTHORITY=https://octo-identity-services:5003
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=https://+:5001
+      - ASPNETCORE_HTTPS_PORT=5001
+      - ASPNETCORE_Kestrel__Certificates__Default__Password=Secret01
+      - ASPNETCORE_Kestrel__Certificates__Default__Path=/etc/octo-asset/localhost_cert.pfx
+    ports:
+      - "5001:5001"
+    networks:
+      - octo-internal
+    volumes:
+      - "./localhost_cert.pfx:/etc/octo-asset/localhost_cert.pfx"
+      - "./localhost_cert.pem:/etc/ssl/certs/localhost_cert.pem"
+    links:
+      - octo-identity-services
+      - rabbitmq
+      - mongo-0.mongo
+      - mongo-1.mongo
+      - mongo-2.mongo
+      
+  octo-bot-services:
+    hostname: octo-bot-services
+    container_name: octo-bot-services
+    image: meshmakers/octo-mesh-bot-services:${OCTO_VERSION}
+    restart: always
+    environment:
+      - OCTO_SYSTEM__DATABASEUSERPASSWORD=${USER_PASSWORD}
+      - OCTO_SYSTEM__ADMINUSERPASSWORD=${ADMIN_PASSWORD}
+      - OCTO_SYSTEM__DATABASEHOST=mongo-0.mongo:27017,mongo-1.mongo:27017,mongo-2.mongo:27017
+      - OCTO_BOT__BROKERHOST=rabbitmq
+      - OCTO_BOT__BROKERUSER=${RABBITMQ_DEFAULT_USER}
+      - OCTO_BOT__BROKERPASSWORD=${RABBITMQ_DEFAULT_PASS}
+      - OCTO_BOT__AUTHORITYURL=https://octo-identity-services:5003
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=https://+:5009
+      - ASPNETCORE_HTTPS_PORT=5009
+      - ASPNETCORE_Kestrel__Certificates__Default__Password=Secret01
+      - ASPNETCORE_Kestrel__Certificates__Default__Path=/etc/octo-bot/localhost_cert.pfx
+    ports:
+      - "5009:5009"
+    networks:
+      - octo-internal
+    volumes:
+      - "./localhost_cert.pfx:/etc/octo-bot/localhost_cert.pfx"
+      - "./localhost_cert.pem:/etc/ssl/certs/localhost_cert.pem"
+    links:
+      - octo-identity-services
+      - rabbitmq
+      - mongo-0.mongo
+      - mongo-1.mongo
+      - mongo-2.mongo
+      
+  octo-communication-controller-services:
+    hostname: octo-communication-controller-services
+    container_name: octo-communication-controller-services
+    image: meshmakers/octo-mesh-communication-controller-services:${OCTO_VERSION}
+    restart: always
+    environment:
+      - OCTO_SYSTEM__DATABASEUSERPASSWORD=${USER_PASSWORD}
+      - OCTO_SYSTEM__ADMINUSERPASSWORD=${ADMIN_PASSWORD}
+      - OCTO_SYSTEM__DATABASEHOST=mongo-0.mongo:27017,mongo-1.mongo:27017,mongo-2.mongo:27017
+      - OCTO_COMMUNICATIONCONTROLLER__BROKERHOST=rabbitmq
+      - OCTO_COMMUNICATIONCONTROLLER__BROKERUSER=${RABBITMQ_DEFAULT_USER}
+      - OCTO_COMMUNICATIONCONTROLLER__BROKERPASSWORD=${RABBITMQ_DEFAULT_PASS}
+      - OCTO_COMMUNICATIONCONTROLLER__AUTHORITY=https://octo-identity-services:5003
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=https://+:5015
+      - ASPNETCORE_HTTPS_PORT=5015
+      - ASPNETCORE_Kestrel__Certificates__Default__Password=Secret01
+      - ASPNETCORE_Kestrel__Certificates__Default__Path=/etc/octo-com-ctrl/localhost_cert.pfx
+    ports:
+      - "5015:5015"
+    networks:
+      - octo-internal
+    volumes:
+      - "./localhost_cert.pfx:/etc/octo-com-ctrl/localhost_cert.pfx"
+      - "./localhost_cert.pem:/etc/ssl/certs/localhost_cert.pem"
+    links:
+      - octo-identity-services
+      - rabbitmq
+      - mongo-0.mongo
+      - mongo-1.mongo
+      - mongo-2.mongo
+      
+  octo-admin-panel:
+    hostname: octo-admin-panel
+    container_name: octo-admin-panel
+    image: meshmakers/octo-mesh-adminpanel:${OCTO_VERSION}
+    restart: always
+    environment:
+      - OCTO_ADMINPANEL__AUTHORITYURL=https://octo-identity-services:5003
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=https://+:5005
+      - ASPNETCORE_HTTPS_PORT=5005
+      - ASPNETCORE_Kestrel__Certificates__Default__Password=Secret01
+      - ASPNETCORE_Kestrel__Certificates__Default__Path=/etc/octo-admin-panel/localhost_cert.pfx
+    ports:
+      - "5005:5005"
+    networks:
+      - octo-internal
+    volumes:
+      - "./localhost_cert.pfx:/etc/octo-admin-panel/localhost_cert.pfx"
+      - "./localhost_cert.pem:/etc/ssl/certs/localhost_cert.pem"
+    links:
+      - octo-identity-services

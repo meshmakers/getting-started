@@ -1,0 +1,26 @@
+[ req ]
+default_bits        = 2048
+distinguished_name  = req_distinguished_name
+req_extensions      = req_ext
+x509_extensions     = v3_req
+prompt              = no
+
+[ req_distinguished_name ]
+countryName         = AT
+stateOrProvinceName = Salzburg
+localityName        = Salzburg
+organizationName    = meshmakers GmbH
+commonName          = localhost
+
+[ v3_req ]
+basicConstraints    = CA:FALSE
+keyUsage            = nonRepudiation, digitalSignature, keyEncipherment
+subjectAltName      = @alt_names
+
+[ req_ext ]
+subjectAltName      = @alt_names
+
+[ alt_names ]
+DNS.1               = localhost
+DNS.2               = octo-identity-services
+DNS.3               = octo-asset-rep-services
