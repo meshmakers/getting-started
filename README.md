@@ -57,6 +57,10 @@ cd scripts
 ```
 This command will start the OctoMesh platform with mongodb and crate databases, and the OctoMesh services.
 
+## Install the certificate 
+
+In the infrastructure folder, the install script created certificates. To allow the tools to connect to the platform, install the certificate into the local certificate store.
+
 ## Log-In to OctoMesh
 
 Navigate to https://octo-identity-services:5003/ in your browser to view the OctoMesh platform.
