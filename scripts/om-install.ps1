@@ -36,9 +36,9 @@ function Create-HttpsCert()
     Write-Host 2
     openssl x509 -req -days 365 -in $csrFilePath -signkey $keyFilePath -out $sourceCrtFilePath -extensions req_ext -extfile openssl.cnf
     Write-Host 3
-    cat $sourceCrtFilePath $keyFilePath > $destinationPemFilePath
+    Get-Content $sourceCrtFilePath, $keyFilePath | Set-Content $destinationPemFilePath
     # Erstelle eine PFX-Datei
-  #  Write-Host 4
+    Write-Host 4
     openssl pkcs12 -export -out $sourcePfxFilePath -inkey  $keyFilePath -in $sourceCrtFilePath -passout pass:$certPassword
   #  Write-Host 5
     #dotnet dev-certs https -ep $sourcePfxFilePath -p $certPassword -t
