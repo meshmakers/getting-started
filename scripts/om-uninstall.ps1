@@ -1,5 +1,5 @@
 $basedir = $PWD
-$infrastructurePath = Join-Path $basedir "infrastructure"
+$infrastructurePath = Join-Path $basedir "octo-mesh"
 Set-Location $infrastructurePath
 
 Write-Host "Initializing infrastructure for octo mesh";

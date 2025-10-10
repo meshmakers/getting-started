@@ -57,7 +57,7 @@ function Create-IdentityServerAuthorityCert()
 #$PSStyle.Progress.View = "Classic"
 
 $basedir = $PWD
-$infrastructurePath = Join-Path $basedir "infrastructure"
+$infrastructurePath = Join-Path $basedir "octo-mesh"
 Set-Location $infrastructurePath
 
 # create the key file for mongodb
@@ -112,7 +112,7 @@ Write-Progress -Activity 'Install Octo infrastructure' -Status 'Docker compose u
 docker compose up -d
 
 Write-Progress -Activity 'Install Octo infrastructure' -Status  "Waiting for the containers to be started..." -PercentComplete 40
-Wait-DockerContainer mongo-0.mongo
+Wait-DockerContainer octo-mongo-0.mongo
 Start-Sleep -s 3
 
 Write-Progress -Activity 'Install Octo infrastructure' -Status 'Setting up mongodb replicaset' -PercentComplete 60
@@ -121,7 +121,7 @@ Write-Host "Initializing replica set and waiting for complete initialization";
 while ($true)
 {
     &{
-        docker exec mongo-0.mongo sh -c "mongosh admin /scripts/init-database.js"
+        docker exec octo-mongo-0.mongo sh -c "mongosh admin /scripts/init-database.js"
     } 2> stderr.txt
     $err = get-content stderr.txt
     Write-Host $err
@@ -138,7 +138,7 @@ while ($true)
 
 # init user.
 Write-Progress -Activity 'Install Octo infrastructure' -Status 'Creating admin user' -PercentComplete 80
-docker exec mongo-0.mongo sh -c "mongosh admin /scripts/create-admin-user.js"
+docker exec octo-mongo-0.mongo sh -c "mongosh admin /scripts/create-admin-user.js"
 
 Write-Progress -Activity 'Install Octo infrastructure' -Status 'Complete' -PercentComplete 100
 

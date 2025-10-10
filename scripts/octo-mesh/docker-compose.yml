@@ -3,21 +3,21 @@ networks:
     driver: bridge
     ipam:
       config:
-          - subnet: 172.20.0.0/16
+          - subnet: 172.21.0.0/16
 volumes:
-  mongo-data0:
-  mongo-data1:
-  mongo-data2:
-  crate-data1:
-  crate-data2:
-  crate-data3:
+  octo-mongo-data0:
+  octo-mongo-data1:
+  octo-mongo-data2:
+  octo-crate-data1:
+  octo-crate-data2:
+  octo-crate-data3:
 
 services:
-  mongo-2.mongo:
-    hostname: mongo-2.mongo
-    container_name: mongo-2.mongo
-    image: mongo:7.0.5
-    command: bash -c "chmod 400 /data/file.key && /usr/bin/mongod --keyFile /data/file.key --replSet rs --bind_ip_all" 
+  octo-mongo-2.mongo:
+    hostname: octo-mongo-2.mongo
+    container_name: octo-mongo-2.mongo
+    image: mongo:8.0.12
+    command: bash -c "chmod 400 /data/file.key && /usr/bin/mongod --keyFile /data/file.key --replSet rs --bind_ip_all"
     ports:
       - "27018:27017"
     restart: always
@@ -25,13 +25,13 @@ services:
       - octo-internal
     volumes:
       - "./file.key:/data/file.key"
-      - "mongo-data2:/data/db"
+      - "octo-mongo-data2:/data/db"
 
-  mongo-1.mongo:
-    hostname: mongo-1.mongo
-    container_name: mongo-1.mongo
-    image: mongo:7.0.5
-    command: bash -c "chmod 400 /data/file.key && /usr/bin/mongod --keyFile /data/file.key --replSet rs --bind_ip_all" 
+  octo-mongo-1.mongo:
+    hostname: octo-mongo-1.mongo
+    container_name: octo-mongo-1.mongo
+    image: mongo:8.0.12
+    command: bash -c "chmod 400 /data/file.key && /usr/bin/mongod --keyFile /data/file.key --replSet rs --bind_ip_all"
     ports:
       - "27019:27017"
     restart: always
@@ -39,18 +39,18 @@ services:
       - octo-internal
     volumes:
       - "./file.key:/data/file.key"
-      - "mongo-data1:/data/db"
+      - "octo-mongo-data1:/data/db"
 
-  mongo-0.mongo:
-    hostname: mongo-0.mongo
-    container_name: mongo-0.mongo
-    image: mongo:7.0.5
-    command: bash -c "chmod 400 /data/file.key && /usr/bin/mongod --keyFile /data/file.key --replSet rs --bind_ip_all" 
+  octo-mongo-0.mongo:
+    hostname: octo-mongo-0.mongo
+    container_name: octo-mongo-0.mongo
+    image: mongo:8.0.12
+    command: bash -c "chmod 400 /data/file.key && /usr/bin/mongod --keyFile /data/file.key --replSet rs --bind_ip_all"
     ports:
       - "27017:27017"
     links:
-      - mongo-1.mongo
-      - mongo-2.mongo
+      - octo-mongo-1.mongo
+      - octo-mongo-2.mongo
     restart: always
     networks:
       - octo-internal
@@ -58,11 +58,11 @@ services:
       - "./scripts/init-database.js:/scripts/init-database.js"
       - "./scripts/create-admin-user.js:/scripts/create-admin-user.js"
       - "./file.key:/data/file.key"
-      - "mongo-data0:/data/db"
+      - "octo-mongo-data0:/data/db"
 
-  rabbitmq:
-    container_name: rabbitmq
-    image: rabbitmq:3.12-management
+  octo-rabbitmq:
+    container_name: octo-rabbitmq
+    image: rabbitmq:4.0.6-management
 
     environment:
       - RABBITMQ_DEFAULT_USER=${RABBITMQ_DEFAULT_USER}
@@ -73,26 +73,28 @@ services:
       - "5672:5672"
       - "15672:15672"
     restart: always
-  cratedb01:
-    hostname: cratedb01
-    container_name: cratedb01
-    image: crate:latest
+  octo-cratedb01:
+    hostname: octo-cratedb01
+    container_name: octo-cratedb01
+    image: crate:5.10.10
     ports:
       - "4201:4200"
       - "5432:5432"
     volumes:
-      - crate-data1:/data
+      - octo-crate-data1:/data
+      - ./backup:/mnt/backup
     command:
       [
         "crate",
-        "-Ccluster.name=crate-docker-cluster",
-        "-Cnode.name=cratedb01",
+        "-Ccluster.name=octo-crate-docker-cluster",
+        "-Cnode.name=octo-cratedb01",
         "-Cnode.data=true",
         "-Cnetwork.host=_site_",
-        "-Cdiscovery.seed_hosts=cratedb02,cratedb03",
-        "-Ccluster.initial_master_nodes=cratedb01,cratedb02,cratedb03",
+        "-Cdiscovery.seed_hosts=octo-cratedb02,octo-cratedb03",
+        "-Ccluster.initial_master_nodes=octo-cratedb01,octo-cratedb02,octo-cratedb03",
         "-Cgateway.expected_data_nodes=3",
         "-Cgateway.recover_after_data_nodes=2",
+        "-Cpath.repo=/mnt/backup",
       ]
     deploy:
       replicas: 1
@@ -101,26 +103,28 @@ services:
     environment:
       - CRATE_HEAP_SIZE=2g
 
-  cratedb02:
-    hostname: cratedb02
-    container_name: cratedb02
-    image: crate:latest
+  octo-cratedb02:
+    hostname: octo-cratedb02
+    container_name: octo-cratedb02
+    image: crate:5.10.10
     ports:
       - "4202:4200"
       - "5433:5432"
     volumes:
-      - crate-data2:/data
+      - octo-crate-data2:/data
+      - ./backup:/mnt/backup
     command:
       [
         "crate",
-        "-Ccluster.name=crate-docker-cluster",
-        "-Cnode.name=cratedb02",
+        "-Ccluster.name=octo-crate-docker-cluster",
+        "-Cnode.name=octo-cratedb02",
         "-Cnode.data=true",
         "-Cnetwork.host=_site_",
-        "-Cdiscovery.seed_hosts=cratedb01,cratedb03",
-        "-Ccluster.initial_master_nodes=cratedb01,cratedb02,cratedb03",
+        "-Cdiscovery.seed_hosts=octo-cratedb01,octo-cratedb03",
+        "-Ccluster.initial_master_nodes=octo-cratedb01,octo-cratedb02,octo-cratedb03",
         "-Cgateway.expected_data_nodes=3",
         "-Cgateway.recover_after_data_nodes=2",
+        "-Cpath.repo=/mnt/backup",
       ]
     deploy:
       replicas: 1
@@ -129,24 +133,25 @@ services:
     environment:
       - CRATE_HEAP_SIZE=2g
 
-  cratedb03:
-    hostname: cratedb03
-    container_name: cratedb03
-    image: crate:latest
+  octo-cratedb03:
+    hostname: octo-cratedb03
+    container_name: octo-cratedb03
+    image: crate:5.10.10
     ports:
       - "4203:4200"
       - "5434:5432"
     volumes:
-      - crate-data3:/data
+      - octo-crate-data3:/data
+      - ./backup:/mnt/backup
     command:
       [
         "crate",
-        "-Ccluster.name=crate-docker-cluster",
-        "-Cnode.name=cratedb03",
+        "-Ccluster.name=octo-crate-docker-cluster",
+        "-Cnode.name=octo-cratedb03",
         "-Cnode.data=true",
         "-Cnetwork.host=_site_",
-        "-Cdiscovery.seed_hosts=cratedb01,cratedb02",
-        "-Ccluster.initial_master_nodes=cratedb01,cratedb02,cratedb03",
+        "-Cdiscovery.seed_hosts=octo-cratedb01,octo-cratedb02",
+        "-Ccluster.initial_master_nodes=octo-cratedb01,octo-cratedb02,octo-cratedb03",
         "-Cgateway.expected_data_nodes=3",
         "-Cgateway.recover_after_data_nodes=2",
       ]
@@ -165,8 +170,8 @@ services:
     environment:
       - OCTO_SYSTEM__DATABASEUSERPASSWORD=${USER_PASSWORD}
       - OCTO_SYSTEM__ADMINUSERPASSWORD=${ADMIN_PASSWORD}
-      - OCTO_SYSTEM__DATABASEHOST=mongo-0.mongo:27017,mongo-1.mongo:27017,mongo-2.mongo:27017
-      - OCTO_IDENTITY__BROKERHOST=rabbitmq
+      - OCTO_SYSTEM__DATABASEHOST=octo-mongo-0.mongo:27017,octo-mongo-1.mongo:27017,octo-mongo-2.mongo:27017
+      - OCTO_IDENTITY__BROKERHOST=octo-rabbitmq
       - OCTO_IDENTITY__BROKERUSER=${RABBITMQ_DEFAULT_USER}
       - OCTO_IDENTITY__BROKERPASSWORD=${RABBITMQ_DEFAULT_PASS}
       - OCTO_IDENTITY__KeyFilePath=/etc/octo-identity/IdentityServer4Auth.pfx
@@ -186,10 +191,10 @@ services:
       - "./localhost_cert.pfx:/etc/octo-identity/localhost_cert.pfx"
       - "./localhost_cert.pem:/etc/ssl/certs/localhost_cert.pem"
     links:
-      - rabbitmq
-      - mongo-0.mongo
-      - mongo-1.mongo
-      - mongo-2.mongo
+      - octo-rabbitmq
+      - octo-mongo-0.mongo
+      - octo-mongo-1.mongo
+      - octo-mongo-2.mongo
       
   octo-asset-services:
     hostname: octo-asset-rep-services
@@ -199,8 +204,8 @@ services:
     environment:
       - OCTO_SYSTEM__DATABASEUSERPASSWORD=${USER_PASSWORD}
       - OCTO_SYSTEM__ADMINUSERPASSWORD=${ADMIN_PASSWORD}
-      - OCTO_SYSTEM__DATABASEHOST=mongo-0.mongo:27017,mongo-1.mongo:27017,mongo-2.mongo:27017
-      - OCTO_ASSETREPOSITORY__BROKERHOST=rabbitmq
+      - OCTO_SYSTEM__DATABASEHOST=octo-mongo-0.mongo:27017,octo-mongo-1.mongo:27017,octo-mongo-2.mongo:27017
+      - OCTO_ASSETREPOSITORY__BROKERHOST=octo-rabbitmq
       - OCTO_ASSETREPOSITORY__BROKERUSER=${RABBITMQ_DEFAULT_USER}
       - OCTO_ASSETREPOSITORY__BROKERPASSWORD=${RABBITMQ_DEFAULT_PASS}
       - OCTO_ASSETREPOSITORY__AUTHORITY=https://octo-identity-services:5003
@@ -218,10 +223,10 @@ services:
       - "./localhost_cert.pem:/etc/ssl/certs/localhost_cert.pem"
     links:
       - octo-identity-services
-      - rabbitmq
-      - mongo-0.mongo
-      - mongo-1.mongo
-      - mongo-2.mongo
+      - octo-rabbitmq
+      - octo-mongo-0.mongo
+      - octo-mongo-1.mongo
+      - octo-mongo-2.mongo
       
   octo-bot-services:
     hostname: octo-bot-services
@@ -231,8 +236,8 @@ services:
     environment:
       - OCTO_SYSTEM__DATABASEUSERPASSWORD=${USER_PASSWORD}
       - OCTO_SYSTEM__ADMINUSERPASSWORD=${ADMIN_PASSWORD}
-      - OCTO_SYSTEM__DATABASEHOST=mongo-0.mongo:27017,mongo-1.mongo:27017,mongo-2.mongo:27017
-      - OCTO_BOT__BROKERHOST=rabbitmq
+      - OCTO_SYSTEM__DATABASEHOST=octo-mongo-0.mongo:27017,octo-mongo-1.mongo:27017,octo-mongo-2.mongo:27017
+      - OCTO_BOT__BROKERHOST=octo-rabbitmq
       - OCTO_BOT__BROKERUSER=${RABBITMQ_DEFAULT_USER}
       - OCTO_BOT__BROKERPASSWORD=${RABBITMQ_DEFAULT_PASS}
       - OCTO_BOT__AUTHORITYURL=https://octo-identity-services:5003
@@ -250,10 +255,10 @@ services:
       - "./localhost_cert.pem:/etc/ssl/certs/localhost_cert.pem"
     links:
       - octo-identity-services
-      - rabbitmq
-      - mongo-0.mongo
-      - mongo-1.mongo
-      - mongo-2.mongo
+      - octo-rabbitmq
+      - octo-mongo-0.mongo
+      - octo-mongo-1.mongo
+      - octo-mongo-2.mongo
       
   octo-communication-controller-services:
     hostname: octo-communication-controller-services
@@ -263,8 +268,8 @@ services:
     environment:
       - OCTO_SYSTEM__DATABASEUSERPASSWORD=${USER_PASSWORD}
       - OCTO_SYSTEM__ADMINUSERPASSWORD=${ADMIN_PASSWORD}
-      - OCTO_SYSTEM__DATABASEHOST=mongo-0.mongo:27017,mongo-1.mongo:27017,mongo-2.mongo:27017
-      - OCTO_COMMUNICATIONCONTROLLER__BROKERHOST=rabbitmq
+      - OCTO_SYSTEM__DATABASEHOST=octo-mongo-0.mongo:27017,octo-mongo-1.mongo:27017,octo-mongo-2.mongo:27017
+      - OCTO_COMMUNICATIONCONTROLLER__BROKERHOST=octo-rabbitmq
       - OCTO_COMMUNICATIONCONTROLLER__BROKERUSER=${RABBITMQ_DEFAULT_USER}
       - OCTO_COMMUNICATIONCONTROLLER__BROKERPASSWORD=${RABBITMQ_DEFAULT_PASS}
       - OCTO_COMMUNICATIONCONTROLLER__AUTHORITY=https://octo-identity-services:5003
@@ -282,10 +287,10 @@ services:
       - "./localhost_cert.pem:/etc/ssl/certs/localhost_cert.pem"
     links:
       - octo-identity-services
-      - rabbitmq
-      - mongo-0.mongo
-      - mongo-1.mongo
-      - mongo-2.mongo
+      - octo-rabbitmq
+      - octo-mongo-0.mongo
+      - octo-mongo-1.mongo
+      - octo-mongo-2.mongo
       
   octo-admin-panel:
     hostname: octo-admin-panel
@@ -295,9 +300,9 @@ services:
     environment:
       - OCTO_SYSTEM__DATABASEUSERPASSWORD=${USER_PASSWORD}
       - OCTO_SYSTEM__ADMINUSERPASSWORD=${ADMIN_PASSWORD}
-      - OCTO_SYSTEM__DATABASEHOST=mongo-0.mongo:27017,mongo-1.mongo:27017,mongo-2.mongo:27017
+      - OCTO_SYSTEM__DATABASEHOST=octo-mongo-0.mongo:27017,octo-mongo-1.mongo:27017,octo-mongo-2.mongo:27017
       - OCTO_ADMINPANEL__AUTHORITYURL=https://octo-identity-services:5003
-      - OCTO_ADMINPANEL__BROKERHOST=rabbitmq
+      - OCTO_ADMINPANEL__BROKERHOST=octo-rabbitmq
       - OCTO_ADMINPANEL__BROKERUSER=${RABBITMQ_DEFAULT_USER}
       - OCTO_ADMINPANEL__BROKERPASSWORD=${RABBITMQ_DEFAULT_PASS}
       - ASPNETCORE_ENVIRONMENT=Development
@@ -314,7 +319,7 @@ services:
       - "./localhost_cert.pem:/etc/ssl/certs/localhost_cert.pem"
     links:
       - octo-identity-services
-      - rabbitmq
-      - mongo-0.mongo
-      - mongo-1.mongo
-      - mongo-2.mongo
+      - octo-rabbitmq
+      - octo-mongo-0.mongo
+      - octo-mongo-1.mongo
+      - octo-mongo-2.mongo
