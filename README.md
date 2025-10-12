@@ -38,7 +38,7 @@ octo-cli is a command-line interface (CLI) tool that allows you to interact with
 
 ```pwsh
 # Install the OctoMesh CLI
-choco install octo-cli --version=3.1.37
+choco install octo-cli
 ```
 
 Ensure that octo-cli installed successfully by running the following command:
