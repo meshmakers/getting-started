@@ -1,6 +1,6 @@
 
 $basedir = $PWD
-$infrastructurePath = Join-Path $basedir "infrastructure"
+$infrastructurePath = Join-Path $basedir "octo-mesh"
 
 if (!(Test-Path $infrastructurePath)) {
     Write-Error "Infrastructure path $infrastructurePath does not exist"

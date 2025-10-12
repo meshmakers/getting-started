@@ -168,6 +168,7 @@ services:
     image: meshmakers/octo-mesh-identity-services:${OCTO_VERSION}
     restart: always    
     environment:
+      - OCTO_SYSTEM__AllowInsecureTls=true
       - OCTO_SYSTEM__DATABASEUSERPASSWORD=${USER_PASSWORD}
       - OCTO_SYSTEM__ADMINUSERPASSWORD=${ADMIN_PASSWORD}
       - OCTO_SYSTEM__DATABASEHOST=octo-mongo-0.mongo:27017,octo-mongo-1.mongo:27017,octo-mongo-2.mongo:27017
@@ -177,6 +178,8 @@ services:
       - OCTO_IDENTITY__KeyFilePath=/etc/octo-identity/IdentityServer4Auth.pfx
       - OCTO_IDENTITY__KEYFILEPASSWORD=mvf*vkm9ehe.hyr!KRA
       - OCTO_IDENTITY__AUTHORITYURL=https://octo-identity-services:5003
+      - OCTO_IDENTITY__IdentityServerLicenseKey=eyJhbGciOiJQUzI1NiIsImtpZCI6IklkZW50aXR5U2VydmVyTGljZW5zZUtleS83Y2VhZGJiNzgxMzA0NjllODgwNjg5MTAyNTQxNGYxNiIsInR5cCI6ImxpY2Vuc2Urand0In0.eyJpc3MiOiJodHRwczovL2R1ZW5kZXNvZnR3YXJlLmNvbSIsImF1ZCI6IklkZW50aXR5U2VydmVyIiwiaWF0IjoxNzU2NDc5ODcxLCJleHAiOjE3ODgwMTU4NzEsImNvbXBhbnlfbmFtZSI6Ik1lc2htYWtlcnMgR21iSCIsImNvbnRhY3RfaW5mbyI6ImdlcmFsZC5sb2NobmVyQHNhbHpidXJnZGV2LmF0IiwiZWRpdGlvbiI6IkNvbW11bml0eSJ9.TNjfPOqI7s2q2w5wcogN2KydjZJ0Bq0C7myOq82SA-fW7fekbqqaaIOHFSEGbtQ_CDmCNhsaBJq29Y1YxMwvR5FzXuZb0G0typHroie9OT0YiMbe82C9J9xVTUTj7R_0Sa2wk-OpaTO9AWMF4ZNfZs3f8QD_jD3PTkKkjhKGJbGWubpRM2WxnEX6vicEkcnxrM3jFfg81dKAVviRy8HIAT9b7hQZlYbT2pVoM2lpqNsb1cDy0_dqMxPFaP0FhSVkG-sNDWy2fqv-SJHjHYx6BMeRkxzf2ycRF09uWFJJvc_ckQ7nqO5pRtpacWaQ-EU-ze4j5jnnEgdXaLuwZwNCWg
+      - OCTO_IDENTITY__AutoMapperLicenseKey=eyJhbGciOiJSUzI1NiIsImtpZCI6Ikx1Y2t5UGVubnlTb2Z0d2FyZUxpY2Vuc2VLZXkvYmJiMTNhY2I1OTkwNGQ4OWI0Y2IxYzg1ZjA4OGNjZjkiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL2x1Y2t5cGVubnlzb2Z0d2FyZS5jb20iLCJhdWQiOiJMdWNreVBlbm55U29mdHdhcmUiLCJleHAiOiIxNzg1MTk2ODAwIiwiaWF0IjoiMTc1MzcxMzU3MSIsImFjY291bnRfaWQiOiIwMTk4NTE3OTFmNzY3ZDEwOGMwYjNiYzhjODNlMmY5NSIsImN1c3RvbWVyX2lkIjoiY3RtXzAxazE4cWp4NTJtemtlbW1wcWszZmF5Mnl3Iiwic3ViX2lkIjoiLSIsImVkaXRpb24iOiIwIiwidHlwZSI6IjIifQ.qlbbn1_eEpLhfUIIaVMGHhiKT_FTgR7b9niUJAfZE6MA5jPLAdpzQFKhvAsMTAl8fB2tCXsrsN7lT_OSFSSsmZKY1nLwvQs5GgfyGfG0vGbWQBbQbml27ofnZcTbMVideLqOJ1uZtWkilFjQ5utvt2id4n7zegDSgXbL2uA8Fe7iE1uZdm7rMjx5nFBXSt3694FlljVQ0YcJwIhGM1J-JxoGPfsfhbpSMP3YHbWlRDv2Gt53mir5tSpYLb6ZelFkjz7a4j7Fp0kctbWMI2nPH-XIz3KbExGxRIQ3G4XJ-lHnf9mWrrgoOXmGWQihQPStfpsLIpDy7zqyLJmPbB1M4g
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_URLS=https://+:5003
       - ASPNETCORE_HTTPS_PORT=5003

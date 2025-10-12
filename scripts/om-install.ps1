@@ -75,7 +75,7 @@ else
     Write-Host "Already existing key for mongodb cluster"
 }
 
-Write-Progress -Activity 'Install Octo infrastructure' -Status 'Initializing cert for Authority' -PercentComplete 10
+Write-Progress -Activity 'Install OctoMesh' -Status 'Initializing cert for Authority' -PercentComplete 10
 if (!(Test-Path -Path "IdentityServer4Auth.pfx"))
 {
     Create-IdentityServerAuthorityCert
@@ -90,7 +90,7 @@ else
     Write-Host "Already existing cert for authenication Authority"    
 }
 
-Write-Progress -Activity 'Install Octo infrastructure' -Status 'Initializing HTTPS self signed cert' -PercentComplete 20
+Write-Progress -Activity 'Install OctoMesh' -Status 'Initializing HTTPS self signed cert' -PercentComplete 20
 if (!(Test-Path -Path "localhost_cert.pfx") -or !(Test-Path -Path "localhost_cert.pem"))
 {
     Create-HttpsCert
@@ -111,11 +111,11 @@ Write-Progress -Activity 'Install Octo infrastructure' -Status 'Docker compose u
 # run ...
 docker compose up -d
 
-Write-Progress -Activity 'Install Octo infrastructure' -Status  "Waiting for the containers to be started..." -PercentComplete 40
+Write-Progress -Activity 'Install OctoMesh' -Status  "Waiting for the containers to be started..." -PercentComplete 40
 Wait-DockerContainer octo-mongo-0.mongo
 Start-Sleep -s 3
 
-Write-Progress -Activity 'Install Octo infrastructure' -Status 'Setting up mongodb replicaset' -PercentComplete 60
+Write-Progress -Activity 'Install OctoMesh' -Status 'Setting up mongodb replicaset' -PercentComplete 60
 
 Write-Host "Initializing replica set and waiting for complete initialization";
 while ($true)
@@ -127,7 +127,7 @@ while ($true)
     Write-Host $err
     if ((-not([string]::IsNullOrWhiteSpace($err))) -And $err.Contains("MongoNetworkError"))
     {
-        Write-Progress -Activity 'Install Octo infrastructure' -Status  "Retrying to init replica set..." -PercentComplete 70
+        Write-Progress -Activity 'Install OctoMesh' -Status  "Retrying to init replica set..." -PercentComplete 70
         Start-Sleep -s 3
         continue;
     }
@@ -137,15 +137,16 @@ while ($true)
 
 
 # init user.
-Write-Progress -Activity 'Install Octo infrastructure' -Status 'Creating admin user' -PercentComplete 80
+Write-Progress -Activity 'Install OctoMesh' -Status 'Creating admin user' -PercentComplete 80
 docker exec octo-mongo-0.mongo sh -c "mongosh admin /scripts/create-admin-user.js"
 
-Write-Progress -Activity 'Install Octo infrastructure' -Status 'Complete' -PercentComplete 100
+Write-Progress -Activity 'Install OctoMesh' -Status 'Complete' -PercentComplete 100
 
 #Clear-Host
 Write-Host "Initialization done. Containers are running."
-Write-Host "For the stop use 'om-stop-OctoInfrastructure'"
-Write-Host "For the next start just 'om-start-OctoInfrastructure'"
+Write-Host "For the stop use 'om-stop'"
+Write-Host "For the next start just 'om-start'"
+Write-Host "For uninstall use 'om-uninstall'"
 
 
 Set-Location $basedir
