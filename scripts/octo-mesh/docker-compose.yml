@@ -77,6 +77,8 @@ services:
     hostname: octo-cratedb01
     container_name: octo-cratedb01
     image: crate:5.10.10
+    networks:
+      - octo-internal
     ports:
       - "4201:4200"
       - "5432:5432"
@@ -107,6 +109,8 @@ services:
     hostname: octo-cratedb02
     container_name: octo-cratedb02
     image: crate:5.10.10
+    networks:
+      - octo-internal
     ports:
       - "4202:4200"
       - "5433:5432"
@@ -137,6 +141,8 @@ services:
     hostname: octo-cratedb03
     container_name: octo-cratedb03
     image: crate:5.10.10
+    networks:
+      - octo-internal
     ports:
       - "4203:4200"
       - "5434:5432"
@@ -211,8 +217,6 @@ services:
       - OCTO_SYSTEM__ADMINUSERPASSWORD=${ADMIN_PASSWORD}
       - OCTO_SYSTEM__DATABASEHOST=octo-mongo-0.mongo:27017,octo-mongo-1.mongo:27017,octo-mongo-2.mongo:27017
       - OCTO_ASSETREPOSITORY__STREAMDATAHOST=octo-cratedb01
-      - OCTO_ASSETREPOSITORY__STREAMDATAUSER=crate
-      - OCTO_ASSETREPOSITORY__STREAMDATAPASSWORD=""
       - OCTO_ASSETREPOSITORY__BROKERHOST=octo-rabbitmq
       - OCTO_ASSETREPOSITORY__BROKERUSER=${RABBITMQ_DEFAULT_USER}
       - OCTO_ASSETREPOSITORY__BROKERPASSWORD=${RABBITMQ_DEFAULT_PASS}
@@ -383,8 +387,6 @@ services:
       - OCTO_SYSTEM__DATABASEHOST=octo-mongo-0.mongo:27017,octo-mongo-1.mongo:27017,octo-mongo-2.mongo:27017
       - OCTO_ADAPTER__AUTHORITYURL=https://octo-identity-services:5003
       - OCTO_ADAPTER__STREAMDATAHOST=octo-cratedb01
-      - OCTO_ADAPTER__STREAMDATAUSER=crate
-      - OCTO_ADAPTER__STREAMDATAPASSWORD=""
       - OCTO_ADAPTER__BROKERHOST=octo-rabbitmq
       - OCTO_ADAPTER__BROKERUSER=${RABBITMQ_DEFAULT_USER}
       - OCTO_ADAPTER__BROKERPASSWORD=${RABBITMQ_DEFAULT_PASS}
