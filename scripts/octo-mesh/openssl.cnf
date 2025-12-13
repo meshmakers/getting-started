@@ -24,3 +24,5 @@ subjectAltName      = @alt_names
 DNS.1               = localhost
 DNS.2               = octo-identity-services
 DNS.3               = octo-asset-rep-services
+DNS.4               = octo-reporting-services
+DNS.5               = octo-communication-controller-services

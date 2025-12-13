@@ -390,6 +390,43 @@ function Initialize-EnvLocal([string]$envLocalPath, [string]$deploymentProfile)
         }
     }
 
+    # Adapter Configuration
+    $stepNumber = if ($deploymentProfile -eq "full") { "5" } else { "4" }
+    Write-Host ""
+    Write-Host "Step $stepNumber`: Mesh Adapter Configuration" -ForegroundColor Green
+    Write-Host "------------------------------------"
+
+    $defaultTenantId = "meshtest"
+    $defaultAdapterRtId = "66004fda527ac79a03ecedd7"
+
+    $currentTenantId = if ($existingConfig.ContainsKey("ADAPTER_TENANT_ID")) { $existingConfig["ADAPTER_TENANT_ID"] } else { $defaultTenantId }
+    $currentAdapterRtId = if ($existingConfig.ContainsKey("ADAPTER_ADAPTERRT_ID")) { $existingConfig["ADAPTER_ADAPTERRT_ID"].Trim('"') } else { $defaultAdapterRtId }
+
+    Write-Host "Current Tenant ID: $currentTenantId" -ForegroundColor Yellow
+    $tenantIdInput = Read-Host "Enter Tenant ID (press Enter to keep: $currentTenantId)"
+    if ([string]::IsNullOrWhiteSpace($tenantIdInput))
+    {
+        $adapterTenantId = $currentTenantId
+    }
+    else
+    {
+        $adapterTenantId = $tenantIdInput.Trim()
+    }
+
+    Write-Host "Current Adapter RT ID: $currentAdapterRtId" -ForegroundColor Yellow
+    $adapterRtIdInput = Read-Host "Enter Adapter RT ID (press Enter to keep: $currentAdapterRtId)"
+    if ([string]::IsNullOrWhiteSpace($adapterRtIdInput))
+    {
+        $adapterRtId = $currentAdapterRtId
+    }
+    else
+    {
+        $adapterRtId = $adapterRtIdInput.Trim()
+    }
+
+    Write-Host "Tenant ID: $adapterTenantId" -ForegroundColor Green
+    Write-Host "Adapter RT ID: $adapterRtId" -ForegroundColor Green
+
     # Write .env.local file
     Write-Host ""
     Write-Host "Writing configuration to .env.local..." -ForegroundColor Green
@@ -404,6 +441,10 @@ OCTO_VERSION=$selectedVersion
 # License Keys
 IDENTITY_SERVER_LICENSE_KEY=$identityServerKey
 AUTOMAPPER_LICENSE_KEY=$autoMapperKey
+
+# Adapter Configuration
+ADAPTER_TENANT_ID=$adapterTenantId
+ADAPTER_ADAPTERRT_ID="$adapterRtId"
 "@
 
     # Add Reporting Services version if full profile

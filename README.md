@@ -12,7 +12,7 @@ The `scripts/` folder contains PowerShell scripts to manage the OctoMesh platfor
 | `om-start.ps1`                    | Starts the OctoMesh Docker containers after they have been stopped.                                                                                                                         |
 | `om-stop.ps1`                     | Stops all running OctoMesh Docker containers without removing data.                                                                                                                         |
 | `om-uninstall.ps1`                | Completely removes the OctoMesh platform including all Docker containers and volumes.                                                                                                       |
-| `om-login-local.ps1`              | Configures the octo-cli for the local environment and initiates an interactive login.                                                                                                       |
+| `om-login-local.ps1`              | Configures the octo-cli for the local environment and initiates an interactive login. Supports `-tenantId` and `-includeReporting` parameters.                                             |
 | `om-setupIdentityService-local.ps1` | Creates Identity Service client definitions for Data Refinery Studio. Required when using the `full` profile.                                                                             |
 
 ### Profiles
@@ -105,8 +105,23 @@ Use an email and password to register the admin user. Please note that the email
 Run the following command to log in to the OctoMesh CLI:
 
 ```pwsh
+# Default login (tenant: meshtest, no reporting)
 ./om-login-local.ps1
+
+# Custom tenant ID
+./om-login-local.ps1 -tenantId "mytenant"
+
+# Include Reporting Services (for full profile)
+./om-login-local.ps1 -includeReporting $true
+
+# Both parameters
+./om-login-local.ps1 -tenantId "mytenant" -includeReporting $true
 ```
+
+| Parameter           | Default     | Description                                           |
+|---------------------|-------------|-------------------------------------------------------|
+| `-tenantId`         | `meshtest`  | The tenant ID to configure for the CLI.               |
+| `-includeReporting` | `$false`    | Set to `$true` to include Reporting Services URL.     |
 
 ## Setup Identity Service (full profile only)
 
