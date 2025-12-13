@@ -11,7 +11,7 @@ if (Test-Path -Path "file.key")
 }
 
 Write-Host "Stopping containers and cleaning up volumes";
-docker-compose down -v
+docker-compose --env-file .env --env-file .env.local down -v
 
 
 

@@ -10,7 +10,7 @@ if (!(Test-Path $infrastructurePath)) {
 Push-Location $infrastructurePath
 
 Write-Host "Starting Octo infrastructure"
-docker-compose up -d
+docker-compose --env-file .env --env-file .env.local up -d
 
 Pop-Location
 
