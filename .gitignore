@@ -8,6 +8,7 @@ scripts/octo-mesh/*.crt
 scripts/octo-mesh/*.key
 scripts/octo-mesh/*.csr
 scripts/octo-mesh/*.pem
+scripts/octo-mesh/.env.local
 
 # User-specific files
 *.rsuser

@@ -2,6 +2,18 @@
 
 This readme provides an overview of the OctoMesh platform and how to get started with the OctoMesh CLI.
 
+## Scripts Overview
+
+The `scripts/` folder contains PowerShell scripts to manage the OctoMesh platform:
+
+| Script               | Description                                                                                                                                                                                 |
+|----------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `om-install.ps1`     | Installs and configures the OctoMesh platform. Prompts for version selection and license keys, creates SSL certificates, starts Docker containers, and initializes the MongoDB replica set. |
+| `om-start.ps1`       | Starts the OctoMesh Docker containers after they have been stopped.                                                                                                                         |
+| `om-stop.ps1`        | Stops all running OctoMesh Docker containers without removing data.                                                                                                                         |
+| `om-uninstall.ps1`   | Completely removes the OctoMesh platform including all Docker containers and volumes.                                                                                                       |
+| `om-login-local.ps1` | Configures the octo-cli for the local environment and initiates an interactive login.                                                                                                       |
+
 ## Clone the repository
 
 Clone the repository to your local machine using:
@@ -38,7 +50,7 @@ octo-cli is a command-line interface (CLI) tool that allows you to interact with
 
 ```pwsh
 # Install the OctoMesh CLI
-choco install octo-cli --version=3.1.37
+choco install octo-cli
 ```
 
 Ensure that octo-cli installed successfully by running the following command:
@@ -78,6 +90,7 @@ Run the following command to log in to the OctoMesh CLI:
 - OctoMesh Identity Services: https://octo-identity-services:5003/
 - OctoMesh Repository Playground for system tenant: https://localhost:5001/tenants/octosystem/graphql/playground
 - OctoMesh Admin Panel: https://localhost:5005/
+- OctoMesh Data Refinery Studio: https://localhost:5011/
 - OctoMesh Bot Dashboard: https://localhost:5009/ui/jobs
 
 # Further Reading

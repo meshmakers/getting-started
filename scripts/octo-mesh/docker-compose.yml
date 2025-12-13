@@ -3,7 +3,7 @@ networks:
     driver: bridge
     ipam:
       config:
-          - subnet: 172.21.0.0/16
+          - subnet: 172.28.0.0/16
 volumes:
   octo-mongo-data0:
   octo-mongo-data1:
@@ -166,6 +166,7 @@ services:
     hostname: octo-identity-services
     container_name: octo-identity-services
     image: meshmakers/octo-mesh-identity-services:${OCTO_VERSION}
+    platform: linux/amd64
     restart: always    
     environment:
       - OCTO_SYSTEM__DATABASEUSERPASSWORD=${USER_PASSWORD}
@@ -177,6 +178,8 @@ services:
       - OCTO_IDENTITY__KeyFilePath=/etc/octo-identity/IdentityServer4Auth.pfx
       - OCTO_IDENTITY__KEYFILEPASSWORD=mvf*vkm9ehe.hyr!KRA
       - OCTO_IDENTITY__AUTHORITYURL=https://octo-identity-services:5003
+      - OCTO_IDENTITY__IdentityServerLicenseKey=${IDENTITY_SERVER_LICENSE_KEY}
+      - OCTO_IDENTITY__AutoMapperLicenseKey=${AUTOMAPPER_LICENSE_KEY}
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_URLS=https://+:5003
       - ASPNETCORE_HTTPS_PORT=5003
@@ -200,6 +203,7 @@ services:
     hostname: octo-asset-rep-services
     container_name: octo-asset-rep-services
     image: meshmakers/octo-mesh-asset-rep-services:${OCTO_VERSION}
+    platform: linux/amd64
     restart: always
     environment:
       - OCTO_SYSTEM__DATABASEUSERPASSWORD=${USER_PASSWORD}
@@ -232,6 +236,7 @@ services:
     hostname: octo-bot-services
     container_name: octo-bot-services
     image: meshmakers/octo-mesh-bot-services:${OCTO_VERSION}
+    platform: linux/amd64
     restart: always
     environment:
       - OCTO_SYSTEM__DATABASEUSERPASSWORD=${USER_PASSWORD}
@@ -264,6 +269,7 @@ services:
     hostname: octo-communication-controller-services
     container_name: octo-communication-controller-services
     image: meshmakers/octo-mesh-communication-controller-services:${OCTO_VERSION}
+    platform: linux/amd64
     restart: always
     environment:
       - OCTO_SYSTEM__DATABASEUSERPASSWORD=${USER_PASSWORD}
@@ -296,6 +302,7 @@ services:
     hostname: octo-admin-panel
     container_name: octo-admin-panel
     image: meshmakers/octo-mesh-adminpanel:${OCTO_VERSION}
+    platform: linux/amd64
     restart: always
     environment:
       - OCTO_SYSTEM__DATABASEUSERPASSWORD=${USER_PASSWORD}
@@ -323,3 +330,23 @@ services:
       - octo-mongo-0.mongo
       - octo-mongo-1.mongo
       - octo-mongo-2.mongo
+
+  octo-data-refinery-studio:
+    hostname: octo-data-refinery-studio
+    container_name: octo-data-refinery-studio
+    image: meshmakers/octo-mesh-refinery-studio:${OCTO_VERSION}
+    platform: linux/amd64
+    restart: always
+    environment:
+      - ADMIN_PANEL_URI=https://localhost:5005
+      - APP_URI=https://localhost:5011
+    ports:
+      - "5011:80"
+    networks:
+      - octo-internal
+    volumes:
+      - "./localhost_cert.pfx:/etc/octo-data-refinery-studio/localhost_cert.pfx"
+      - "./localhost_cert.pem:/etc/ssl/certs/localhost_cert.pem"
+    links:
+      - octo-admin-panel
+

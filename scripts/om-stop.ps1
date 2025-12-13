@@ -9,7 +9,7 @@ if (!(Test-Path $infrastructurePath)) {
 
 Push-Location $infrastructurePath
 
-docker-compose down
+docker-compose --env-file .env --env-file .env.local down
 
 Pop-Location
 
