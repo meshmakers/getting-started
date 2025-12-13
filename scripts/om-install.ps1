@@ -1,3 +1,9 @@
+param(
+    [Parameter()]
+    [ValidateSet("core", "full")]
+    [string]$DeploymentProfile = "core"
+)
+
 function Test-Prerequisites
 {
     Write-Host ""
@@ -85,23 +91,39 @@ function Wait-DockerContainer([string]$containerId)
     }
 }
 
-function Get-OctoMeshVersions()
+function Get-HelmChartVersions([string]$chartName)
 {
-    Write-Host "Fetching available OctoMesh versions..."
+    Write-Host "Fetching available versions for $chartName..."
     try
     {
         $response = Invoke-WebRequest -Uri "https://meshmakers.github.io/charts/index.yaml" -UseBasicParsing
         $content = $response.Content
 
-        # Parse appVersion values from the YAML content
         $versions = [System.Collections.ArrayList]@()
-        $regex = [regex]::Matches($content, 'appVersion:\s*([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)')
-        foreach ($match in $regex)
+
+        # Split into individual chart entries (each starts with "- apiVersion:")
+        $entries = $content -split "(?=- apiVersion:)"
+
+        foreach ($entry in $entries)
         {
-            $version = $match.Groups[1].Value
-            if (-not $versions.Contains($version))
+            # Check if this entry is for the exact chart name
+            if ($entry -match "name:\s*$chartName\s*$" -or $entry -match "name:\s*$chartName\s*[\r\n]")
             {
-                [void]$versions.Add($version)
+                # Ensure it's an exact match (not a substring like octo-mesh matching octo-mesh-reporting)
+                if ($entry -match "name:\s*$chartName-")
+                {
+                    continue
+                }
+
+                # Extract appVersion
+                if ($entry -match "appVersion:\s*([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)")
+                {
+                    $version = $matches[1]
+                    if (-not $versions.Contains($version))
+                    {
+                        [void]$versions.Add($version)
+                    }
+                }
             }
         }
 
@@ -111,9 +133,19 @@ function Get-OctoMeshVersions()
     }
     catch
     {
-        Write-Error "Failed to fetch OctoMesh versions: $_"
+        Write-Error "Failed to fetch versions for $chartName`: $_"
         return @()
     }
+}
+
+function Get-OctoMeshVersions()
+{
+    return Get-HelmChartVersions -chartName "octo-mesh"
+}
+
+function Get-ReportingServicesVersions()
+{
+    return Get-HelmChartVersions -chartName "octo-mesh-reporting"
 }
 
 function Read-LicenseKey([string]$prompt)
@@ -145,7 +177,7 @@ function Read-LicenseKey([string]$prompt)
     return $key
 }
 
-function Initialize-EnvLocal([string]$envLocalPath)
+function Initialize-EnvLocal([string]$envLocalPath, [string]$deploymentProfile)
 {
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Cyan
@@ -294,6 +326,70 @@ function Initialize-EnvLocal([string]$envLocalPath)
         }
     }
 
+    # 4. Reporting Services Version (only for full profile)
+    $selectedReportingVersion = ""
+    if ($deploymentProfile -eq "full")
+    {
+        Write-Host ""
+        Write-Host "Step 4: Select Reporting Services Version" -ForegroundColor Green
+        Write-Host "------------------------------------------"
+
+        $reportingVersions = Get-ReportingServicesVersions
+        if ($reportingVersions.Count -eq 0)
+        {
+            Write-Host "Could not fetch Reporting Services versions. Using manual input." -ForegroundColor Yellow
+            $selectedReportingVersion = Read-Host "Enter Reporting Services version (e.g., 1.0.0.0)"
+        }
+        else
+        {
+            $defaultReportingVersion = $reportingVersions[0]
+            $currentReportingVersion = if ($existingConfig.ContainsKey("OCTO_REPORTING_SERVICES_VERSION")) { $existingConfig["OCTO_REPORTING_SERVICES_VERSION"] } else { $null }
+
+            Write-Host "Available versions (showing latest 10):"
+            $displayReportingVersions = $reportingVersions | Select-Object -First 10
+            for ($i = 0; $i -lt $displayReportingVersions.Count; $i++)
+            {
+                $marker = ""
+                if ($displayReportingVersions[$i] -eq $currentReportingVersion) { $marker = " (current)" }
+                if ($i -eq 0) { $marker += " [default]" }
+                Write-Host "  [$($i + 1)] $($displayReportingVersions[$i])$marker"
+            }
+            Write-Host "  [0] Enter custom version"
+            Write-Host ""
+
+            if ($currentReportingVersion)
+            {
+                Write-Host "Current version: $currentReportingVersion" -ForegroundColor Yellow
+            }
+
+            $reportingVersionInput = Read-Host "Select version (press Enter for default: $defaultReportingVersion)"
+
+            if ([string]::IsNullOrWhiteSpace($reportingVersionInput))
+            {
+                $selectedReportingVersion = $defaultReportingVersion
+            }
+            elseif ($reportingVersionInput -eq "0")
+            {
+                $selectedReportingVersion = Read-Host "Enter custom version (e.g., 1.0.0.0)"
+            }
+            else
+            {
+                $index = [int]$reportingVersionInput - 1
+                if ($index -ge 0 -and $index -lt $displayReportingVersions.Count)
+                {
+                    $selectedReportingVersion = $displayReportingVersions[$index]
+                }
+                else
+                {
+                    Write-Host "Invalid selection, using default." -ForegroundColor Yellow
+                    $selectedReportingVersion = $defaultReportingVersion
+                }
+            }
+
+            Write-Host "Selected Reporting Services version: $selectedReportingVersion" -ForegroundColor Green
+        }
+    }
+
     # Write .env.local file
     Write-Host ""
     Write-Host "Writing configuration to .env.local..." -ForegroundColor Green
@@ -309,6 +405,12 @@ OCTO_VERSION=$selectedVersion
 IDENTITY_SERVER_LICENSE_KEY=$identityServerKey
 AUTOMAPPER_LICENSE_KEY=$autoMapperKey
 "@
+
+    # Add Reporting Services version if full profile
+    if ($deploymentProfile -eq "full" -and -not [string]::IsNullOrWhiteSpace($selectedReportingVersion))
+    {
+        $envContent += "`n`n# Reporting Services Version`nOCTO_REPORTING_SERVICES_VERSION=$selectedReportingVersion"
+    }
 
     Set-Content -Path $envLocalPath -Value $envContent -Encoding UTF8
 
@@ -400,7 +502,7 @@ else
 
 if ($needsConfig)
 {
-    $result = Initialize-EnvLocal -envLocalPath $envLocalPath
+    $result = Initialize-EnvLocal -envLocalPath $envLocalPath -deploymentProfile $DeploymentProfile
     if (-not $result)
     {
         Write-Error "Configuration failed. Please try again."
@@ -416,7 +518,7 @@ else
     $reconfigure = Read-Host "Do you want to reconfigure? (y/N)"
     if ($reconfigure -eq "y" -or $reconfigure -eq "Y")
     {
-        $result = Initialize-EnvLocal -envLocalPath $envLocalPath
+        $result = Initialize-EnvLocal -envLocalPath $envLocalPath -deploymentProfile $DeploymentProfile
         if (-not $result)
         {
             Write-Error "Configuration failed. Please try again."
@@ -482,7 +584,15 @@ else
 Write-Progress -Activity 'Install Octo infrastructure' -Status 'Docker compose up' -PercentComplete 30
 
 # run ...
-docker compose --env-file .env --env-file .env.local up -d
+Write-Host "Starting with profile: $DeploymentProfile" -ForegroundColor Cyan
+if ($DeploymentProfile -eq "full")
+{
+    docker compose --env-file .env --env-file .env.local --profile full up -d
+}
+else
+{
+    docker compose --env-file .env --env-file .env.local up -d
+}
 
 Write-Progress -Activity 'Install OctoMesh' -Status  "Waiting for the containers to be started..." -PercentComplete 40
 Wait-DockerContainer octo-mongo-0.mongo
@@ -532,6 +642,18 @@ Write-Host ""
 Write-Host "2. Create the admin user" -ForegroundColor Yellow
 Write-Host "   Open https://octo-identity-services:5003/ in your browser"
 Write-Host "   and register the admin user with an email and password."
+
+if ($DeploymentProfile -eq "full")
+{
+    Write-Host ""
+    Write-Host "3. Log in to OctoMesh CLI" -ForegroundColor Yellow
+    Write-Host "   Run ./om-login-local.ps1 to log in with the admin user."
+    Write-Host ""
+    Write-Host "4. Setup Identity Service clients" -ForegroundColor Yellow
+    Write-Host "   Run ./om-setupIdentityService-local.ps1 to create the client"
+    Write-Host "   definitions for Data Refinery Studio."
+}
+
 Write-Host ""
 Write-Host "Commands:"
 Write-Host "  Stop:  ./om-stop.ps1"

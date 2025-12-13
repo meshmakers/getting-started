@@ -6,13 +6,35 @@ This readme provides an overview of the OctoMesh platform and how to get started
 
 The `scripts/` folder contains PowerShell scripts to manage the OctoMesh platform:
 
-| Script               | Description                                                                                                                                                                                 |
-|----------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `om-install.ps1`     | Installs and configures the OctoMesh platform. Prompts for version selection and license keys, creates SSL certificates, starts Docker containers, and initializes the MongoDB replica set. |
-| `om-start.ps1`       | Starts the OctoMesh Docker containers after they have been stopped.                                                                                                                         |
-| `om-stop.ps1`        | Stops all running OctoMesh Docker containers without removing data.                                                                                                                         |
-| `om-uninstall.ps1`   | Completely removes the OctoMesh platform including all Docker containers and volumes.                                                                                                       |
-| `om-login-local.ps1` | Configures the octo-cli for the local environment and initiates an interactive login.                                                                                                       |
+| Script                            | Description                                                                                                                                                                                 |
+|-----------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `om-install.ps1`                  | Installs and configures the OctoMesh platform. Prompts for version selection and license keys, creates SSL certificates, starts Docker containers, and initializes the MongoDB replica set. |
+| `om-start.ps1`                    | Starts the OctoMesh Docker containers after they have been stopped.                                                                                                                         |
+| `om-stop.ps1`                     | Stops all running OctoMesh Docker containers without removing data.                                                                                                                         |
+| `om-uninstall.ps1`                | Completely removes the OctoMesh platform including all Docker containers and volumes.                                                                                                       |
+| `om-login-local.ps1`              | Configures the octo-cli for the local environment and initiates an interactive login.                                                                                                       |
+| `om-setupIdentityService-local.ps1` | Creates Identity Service client definitions for Data Refinery Studio. Required when using the `full` profile.                                                                             |
+
+### Profiles
+
+The scripts `om-install.ps1`, `om-start.ps1`, and `om-stop.ps1` support a `-DeploymentProfile` parameter:
+
+| Profile | Description                                                    |
+|---------|----------------------------------------------------------------|
+| `core`  | Default. Starts all services except Data Refinery Studio.      |
+| `full`  | Starts all services including Data Refinery Studio.            |
+
+```pwsh
+# Install with core profile (default)
+./om-install.ps1
+
+# Install with full profile (includes Data Refinery Studio)
+./om-install.ps1 -DeploymentProfile full
+
+# Start/Stop with specific profile
+./om-start.ps1 -DeploymentProfile full
+./om-stop.ps1 -DeploymentProfile full
+```
 
 ## Clone the repository
 
@@ -84,6 +106,14 @@ Run the following command to log in to the OctoMesh CLI:
 
 ```pwsh
 ./om-login-local.ps1
+```
+
+## Setup Identity Service (full profile only)
+
+If you installed with `-DeploymentProfile full`, run the following command after logging in to setup the client definitions for Data Refinery Studio:
+
+```pwsh
+./om-setupIdentityService-local.ps1
 ```
 
 ## URIS

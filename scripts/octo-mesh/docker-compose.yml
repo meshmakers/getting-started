@@ -368,12 +368,49 @@ services:
         - octo-mongo-1.mongo
         - octo-mongo-2.mongo
 
+  octo-reporting-services:
+    hostname: octo-reporting-services
+    container_name: octo-reporting-services
+    image: meshmakers/octo-mesh-reporting-services:${OCTO_REPORTING_SERVICES_VERSION}
+    platform: linux/amd64
+    restart: always
+    profiles:
+      - full
+    environment:
+      - OCTO_SYSTEM__DATABASEUSERPASSWORD=${USER_PASSWORD}
+      - OCTO_SYSTEM__ADMINUSERPASSWORD=${ADMIN_PASSWORD}
+      - OCTO_SYSTEM__DATABASEHOST=octo-mongo-0.mongo:27017,octo-mongo-1.mongo:27017,octo-mongo-2.mongo:27017
+      - OCTO_REPORTING__AUTHORITYURL=https://octo-identity-services:5003
+      - OCTO_REPORTING__BROKERHOST=octo-rabbitmq
+      - OCTO_REPORTING__BROKERUSER=${RABBITMQ_DEFAULT_USER}
+      - OCTO_REPORTING__BROKERPASSWORD=${RABBITMQ_DEFAULT_PASS}
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=https://+:5007
+      - ASPNETCORE_HTTPS_PORT=5007
+      - ASPNETCORE_Kestrel__Certificates__Default__Password=Secret01
+      - ASPNETCORE_Kestrel__Certificates__Default__Path=/etc/octo-reporting/localhost_cert.pfx
+    ports:
+      - "5007:5007"
+    networks:
+      - octo-internal
+    volumes:
+      - "./localhost_cert.pfx:/etc/octo-reporting/localhost_cert.pfx"
+      - "./localhost_cert.pem:/etc/ssl/certs/localhost_cert.pem"
+    links:
+      - octo-identity-services
+      - octo-rabbitmq
+      - octo-mongo-0.mongo
+      - octo-mongo-1.mongo
+      - octo-mongo-2.mongo
+
   octo-data-refinery-studio:
     hostname: octo-data-refinery-studio
     container_name: octo-data-refinery-studio
     image: meshmakers/octo-mesh-refinery-studio:${OCTO_VERSION}
     platform: linux/amd64
     restart: always
+    profiles:
+      - full
     environment:
       - ADMIN_PANEL_URI=https://localhost:5005
       - APP_URI=https://localhost:5011
