@@ -338,10 +338,12 @@ services:
       - octo-mongo-0.mongo
       - octo-mongo-1.mongo
       - octo-mongo-2.mongo
+
   octo-mesh-adapter:
       hostname: octo-mesh-adapter
       container_name: octo-mesh-adapter
       image: meshmakers/octo-mesh-adapter:${OCTO_VERSION}
+      platform: linux/amd64
       restart: always
       environment:
         - OCTO_SYSTEM__DATABASEUSERPASSWORD=${USER_PASSWORD}
