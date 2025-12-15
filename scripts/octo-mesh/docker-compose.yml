@@ -354,7 +354,7 @@ services:
         - OCTO_ADAPTER__STREAMDATAHOST=octo-cratedb01
         - OCTO_ADAPTER__TENANTID=${ADAPTER_TENANT_ID}
         - OCTO_ADAPTER__ADAPTERCKTYPEID=System.Communication/MeshAdapter
-        - OCTO_ADAPTER__ADAPTERRTID=${ADAPTER_ID}
+        - OCTO_ADAPTER__ADAPTERRTID=${ADAPTER_ADAPTERRT_ID}
         - OCTO_ADAPTER__COMMUNICATIONCONTROLLERSERVICESURI=https://octo-communication-controller-services:5015
         - ASPNETCORE_ENVIRONMENT=Development
         - ASPNETCORE_URLS=https://+:5021
