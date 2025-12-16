@@ -80,7 +80,7 @@ services:
     networks:
       - octo-internal
     ports:
-      - "4201:4200"
+      - "4301:4200"
       - "5432:5432"
     volumes:
       - octo-crate-data1:/data
@@ -112,7 +112,7 @@ services:
     networks:
       - octo-internal
     ports:
-      - "4202:4200"
+      - "4302:4200"
       - "5433:5432"
     volumes:
       - octo-crate-data2:/data
@@ -144,7 +144,7 @@ services:
     networks:
       - octo-internal
     ports:
-      - "4203:4200"
+      - "4303:4200"
       - "5434:5432"
     volumes:
       - octo-crate-data3:/data
