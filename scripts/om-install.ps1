@@ -467,7 +467,7 @@ function Create-HttpsCert()
     # Install OpenSSL (e. g. winget install -e --id ShiningLight.OpenSSL.Dev)
     if ((Get-Command openssl -ErrorAction SilentlyContinue).Length -eq 0)
     {
-        Write-Error "Ensure that OpenSSL is installed an available in PATH environment variable."
+        Write-Error "Ensure that OpenSSL is installed and available in PATH environment variable."
         return;
     }
     
