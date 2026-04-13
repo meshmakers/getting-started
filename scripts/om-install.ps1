@@ -464,7 +464,7 @@ ADAPTER_ADAPTERRT_ID="$adapterRtId"
 
 function Create-HttpsCert()
 {
-    # Install openseel (e. g. winget install -e --id ShiningLight.OpenSSL.Dev)
+    # Install OpenSSL (e. g. winget install -e --id ShiningLight.OpenSSL.Dev)
     if ((Get-Command openssl -ErrorAction SilentlyContinue).Length -eq 0)
     {
         Write-Error "Ensure that OpenSSL is installed an available in PATH environment variable."
