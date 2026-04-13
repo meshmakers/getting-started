@@ -25,7 +25,7 @@ function Test-Prerequisites
     {
         Write-Host "NOT FOUND" -ForegroundColor Red
         Write-Host "  Please install OpenSSL and ensure it is available in PATH." -ForegroundColor Yellow
-        Write-Host "  Windows: winget install -e --id ShiningLight.OpenSSL" -ForegroundColor Yellow
+        Write-Host "  Windows: winget install -e --id ShiningLight.OpenSSL.Dev" -ForegroundColor Yellow
         Write-Host "  macOS: brew install openssl" -ForegroundColor Yellow
         $allPassed = $false
     }
@@ -464,7 +464,7 @@ ADAPTER_ADAPTERRT_ID="$adapterRtId"
 
 function Create-HttpsCert()
 {
-    # Install openseel (e. g. winget install -e --id ShiningLight.OpenSSL)
+    # Install openseel (e. g. winget install -e --id ShiningLight.OpenSSL.Dev)
     if ((Get-Command openssl -ErrorAction SilentlyContinue).Length -eq 0)
     {
         Write-Error "Ensure that OpenSSL is installed an available in PATH environment variable."
