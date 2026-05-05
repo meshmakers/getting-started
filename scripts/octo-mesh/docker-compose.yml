@@ -359,12 +359,12 @@ services:
         - OCTO_ADAPTER__ADAPTERRTID=${ADAPTER_ADAPTERRT_ID}
         - OCTO_ADAPTER__COMMUNICATIONCONTROLLERSERVICESURI=https://octo-communication-controller-services:5015
         - ASPNETCORE_ENVIRONMENT=Development
-        - ASPNETCORE_URLS=https://+:5021
-        - ASPNETCORE_HTTPS_PORT=5021
+        - ASPNETCORE_URLS=https://+:5020
+        - ASPNETCORE_HTTPS_PORT=5020
         - ASPNETCORE_Kestrel__Certificates__Default__Password=Secret01
         - ASPNETCORE_Kestrel__Certificates__Default__Path=/etc/octo-report/localhost_cert.pfx
       ports:
-        - "5021:5021"
+        - "5020:5020"
       networks:
         - octo-internal
       volumes:
