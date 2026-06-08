@@ -185,6 +185,7 @@ services:
       - OCTO_IDENTITY__KeyFilePath=/etc/octo-identity/IdentityServer4Auth.pfx
       - OCTO_IDENTITY__KEYFILEPASSWORD=mvf*vkm9ehe.hyr!KRA
       - OCTO_IDENTITY__AUTHORITYURL=https://octo-identity-services:5003
+      - OCTO_IDENTITY__RefineryStudioUrl=https://localhost:5011
       - OCTO_IDENTITY__IdentityServerLicenseKey=${IDENTITY_SERVER_LICENSE_KEY}
       - OCTO_IDENTITY__AutoMapperLicenseKey=${AUTOMAPPER_LICENSE_KEY}
       - ASPNETCORE_ENVIRONMENT=Development
@@ -424,7 +425,7 @@ services:
       - ADMIN_PANEL_URI=https://localhost:5005
       - APP_URI=https://localhost:5011
     ports:
-      - "5011:80"
+      - "5011:443"
     networks:
       - octo-internal
     volumes:
