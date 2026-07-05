@@ -17,8 +17,8 @@ if (Test-Path -Path "file.key")
 }
 
 Write-Host "Stopping all containers and cleaning up volumes"
-# Always use --profile full to ensure all services are removed
-docker compose --env-file .env --env-file .env.local --profile full down -v
+# Always use all profiles to ensure all services are removed
+docker compose --env-file .env --env-file .env.local --profile full --profile simulation down -v
 
 Pop-Location
 

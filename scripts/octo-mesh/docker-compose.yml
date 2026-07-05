@@ -378,6 +378,36 @@ services:
         - octo-mongo-1.mongo
         - octo-mongo-2.mongo
 
+  octo-simulation-adapter:
+      hostname: octo-simulation-adapter
+      container_name: octo-simulation-adapter
+      image: meshmakers/octo-communication-adapter-simulation:${OCTO_VERSION}
+      platform: linux/amd64
+      restart: always
+      profiles:
+        - simulation
+      environment:
+        - OCTO_ADAPTER__BROKERHOST=octo-rabbitmq
+        - OCTO_ADAPTER__BROKERUSER=${RABBITMQ_DEFAULT_USER}
+        - OCTO_ADAPTER__BROKERPASSWORD=${RABBITMQ_DEFAULT_PASS}
+        - OCTO_ADAPTER__TENANTID=${SIMULATION_ADAPTER_TENANT_ID}
+        - OCTO_ADAPTER__ADAPTERRTID=${SIMULATION_ADAPTER_RT_ID}
+        - OCTO_ADAPTER__COMMUNICATIONCONTROLLERSERVICESURI=https://octo-communication-controller-services:5015
+        - ASPNETCORE_ENVIRONMENT=Development
+        - ASPNETCORE_URLS=https://+:5023
+        - ASPNETCORE_HTTPS_PORT=5023
+        - ASPNETCORE_Kestrel__Certificates__Default__Password=Secret01
+        - ASPNETCORE_Kestrel__Certificates__Default__Path=/etc/octo-simulation/localhost_cert.pfx
+      ports:
+        - "5023:5023"
+      networks:
+        - octo-internal
+      volumes:
+        - "./localhost_cert.pfx:/etc/octo-simulation/localhost_cert.pfx"
+        - "./localhost_cert.pem:/etc/ssl/certs/localhost_cert.pem"
+      links:
+        - octo-rabbitmq
+
   octo-reporting-services:
     hostname: octo-reporting-services
     container_name: octo-reporting-services

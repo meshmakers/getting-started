@@ -24,6 +24,10 @@ The scripts `om-install.ps1`, `om-start.ps1`, and `om-stop.ps1` support a `-Depl
 | `core`  | Default. Starts all services except Data Refinery Studio.      |
 | `full`  | Starts all services including Data Refinery Studio.            |
 
+### Simulation Adapter
+
+The scripts also support an optional `-IncludeSimulation` switch to start the Simulation Adapter:
+
 ```pwsh
 # Install with core profile (default)
 ./om-install.ps1
@@ -31,10 +35,22 @@ The scripts `om-install.ps1`, `om-start.ps1`, and `om-stop.ps1` support a `-Depl
 # Install with full profile (includes Data Refinery Studio)
 ./om-install.ps1 -DeploymentProfile full
 
+# Install with simulation adapter
+./om-install.ps1 -IncludeSimulation
+
+# Install with full profile and simulation adapter
+./om-install.ps1 -DeploymentProfile full -IncludeSimulation
+
 # Start/Stop with specific profile
 ./om-start.ps1 -DeploymentProfile full
 ./om-stop.ps1 -DeploymentProfile full
+
+# Start/Stop with simulation adapter
+./om-start.ps1 -IncludeSimulation
+./om-stop.ps1 -IncludeSimulation
 ```
+
+When using `-IncludeSimulation`, the install script will prompt for the Simulation Adapter Tenant ID and Adapter RT ID.
 
 ## Clone the repository
 
@@ -137,6 +153,7 @@ If you installed with `-DeploymentProfile full`, run the following command after
 - OctoMesh Admin Panel: https://localhost:5005/
 - OctoMesh Data Refinery Studio: https://localhost:5011/
 - OctoMesh Bot Dashboard: https://localhost:5009/ui/jobs
+- OctoMesh Simulation Adapter: https://localhost:5023/ (when using `-IncludeSimulation`)
 
 # Further Reading
 - [OctoMesh Documentation](https://docs.meshmakers.cloud)

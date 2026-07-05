@@ -1,7 +1,9 @@
 param(
     [Parameter()]
     [ValidateSet("core", "full")]
-    [string]$DeploymentProfile = "core"
+    [string]$DeploymentProfile = "core",
+    [Parameter()]
+    [switch]$IncludeSimulation = $false
 )
 
 function Test-Prerequisites
@@ -177,7 +179,7 @@ function Read-LicenseKey([string]$prompt)
     return $key
 }
 
-function Initialize-EnvLocal([string]$envLocalPath, [string]$deploymentProfile)
+function Initialize-EnvLocal([string]$envLocalPath, [string]$deploymentProfile, [bool]$includeSimulation)
 {
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Cyan
@@ -427,6 +429,49 @@ function Initialize-EnvLocal([string]$envLocalPath, [string]$deploymentProfile)
     Write-Host "Tenant ID: $adapterTenantId" -ForegroundColor Green
     Write-Host "Adapter RT ID: $adapterRtId" -ForegroundColor Green
 
+    # Simulation Adapter Configuration (optional)
+    $simulationAdapterTenantId = ""
+    $simulationAdapterRtId = ""
+
+    if ($includeSimulation)
+    {
+        $nextStepNumber = if ($deploymentProfile -eq "full") { "6" } else { "5" }
+        Write-Host ""
+        Write-Host "Step $nextStepNumber`: Simulation Adapter Configuration" -ForegroundColor Green
+        Write-Host "------------------------------------"
+
+        $defaultSimTenantId = "meshtest"
+        $defaultSimAdapterRtId = "65d5c447b420da3fb12381bc"
+
+        $currentSimTenantId = if ($existingConfig.ContainsKey("SIMULATION_ADAPTER_TENANT_ID")) { $existingConfig["SIMULATION_ADAPTER_TENANT_ID"] } else { $defaultSimTenantId }
+        $currentSimAdapterRtId = if ($existingConfig.ContainsKey("SIMULATION_ADAPTER_RT_ID")) { $existingConfig["SIMULATION_ADAPTER_RT_ID"].Trim('"') } else { $defaultSimAdapterRtId }
+
+        Write-Host "Current Simulation Tenant ID: $currentSimTenantId" -ForegroundColor Yellow
+        $simTenantIdInput = Read-Host "Enter Simulation Adapter Tenant ID (press Enter to keep: $currentSimTenantId)"
+        if ([string]::IsNullOrWhiteSpace($simTenantIdInput))
+        {
+            $simulationAdapterTenantId = $currentSimTenantId
+        }
+        else
+        {
+            $simulationAdapterTenantId = $simTenantIdInput.Trim()
+        }
+
+        Write-Host "Current Simulation Adapter RT ID: $currentSimAdapterRtId" -ForegroundColor Yellow
+        $simAdapterRtIdInput = Read-Host "Enter Simulation Adapter RT ID (press Enter to keep: $currentSimAdapterRtId)"
+        if ([string]::IsNullOrWhiteSpace($simAdapterRtIdInput))
+        {
+            $simulationAdapterRtId = $currentSimAdapterRtId
+        }
+        else
+        {
+            $simulationAdapterRtId = $simAdapterRtIdInput.Trim()
+        }
+
+        Write-Host "Simulation Tenant ID: $simulationAdapterTenantId" -ForegroundColor Green
+        Write-Host "Simulation Adapter RT ID: $simulationAdapterRtId" -ForegroundColor Green
+    }
+
     # Write .env.local file
     Write-Host ""
     Write-Host "Writing configuration to .env.local..." -ForegroundColor Green
@@ -451,6 +496,12 @@ ADAPTER_ADAPTERRT_ID="$adapterRtId"
     if ($deploymentProfile -eq "full" -and -not [string]::IsNullOrWhiteSpace($selectedReportingVersion))
     {
         $envContent += "`n`n# Reporting Services Version`nOCTO_REPORTING_SERVICES_VERSION=$selectedReportingVersion"
+    }
+
+    # Add Simulation Adapter configuration if enabled
+    if ($includeSimulation -and -not [string]::IsNullOrWhiteSpace($simulationAdapterTenantId))
+    {
+        $envContent += "`n`n# Simulation Adapter Configuration`nSIMULATION_ADAPTER_TENANT_ID=$simulationAdapterTenantId`nSIMULATION_ADAPTER_RT_ID=`"$simulationAdapterRtId`""
     }
 
     Set-Content -Path $envLocalPath -Value $envContent -Encoding UTF8
@@ -543,7 +594,7 @@ else
 
 if ($needsConfig)
 {
-    $result = Initialize-EnvLocal -envLocalPath $envLocalPath -deploymentProfile $DeploymentProfile
+    $result = Initialize-EnvLocal -envLocalPath $envLocalPath -deploymentProfile $DeploymentProfile -includeSimulation $IncludeSimulation
     if (-not $result)
     {
         Write-Error "Configuration failed. Please try again."
@@ -559,7 +610,7 @@ else
     $reconfigure = Read-Host "Do you want to reconfigure? (y/N)"
     if ($reconfigure -eq "y" -or $reconfigure -eq "Y")
     {
-        $result = Initialize-EnvLocal -envLocalPath $envLocalPath -deploymentProfile $DeploymentProfile
+        $result = Initialize-EnvLocal -envLocalPath $envLocalPath -deploymentProfile $DeploymentProfile -includeSimulation $IncludeSimulation
         if (-not $result)
         {
             Write-Error "Configuration failed. Please try again."
@@ -625,15 +676,21 @@ else
 Write-Progress -Activity 'Install Octo infrastructure' -Status 'Docker compose up' -PercentComplete 30
 
 # run ...
-Write-Host "Starting with profile: $DeploymentProfile" -ForegroundColor Cyan
+$profileInfo = $DeploymentProfile
+if ($IncludeSimulation) { $profileInfo += " + simulation" }
+Write-Host "Starting with profile: $profileInfo" -ForegroundColor Cyan
+
+$composeArgs = @("compose", "--env-file", ".env", "--env-file", ".env.local")
 if ($DeploymentProfile -eq "full")
 {
-    docker compose --env-file .env --env-file .env.local --profile full up -d
+    $composeArgs += @("--profile", "full")
 }
-else
+if ($IncludeSimulation)
 {
-    docker compose --env-file .env --env-file .env.local up -d
+    $composeArgs += @("--profile", "simulation")
 }
+$composeArgs += @("up", "-d")
+& docker @composeArgs
 
 Write-Progress -Activity 'Install OctoMesh' -Status  "Waiting for the containers to be started..." -PercentComplete 40
 Wait-DockerContainer octo-mongo-0.mongo

@@ -1,7 +1,9 @@
 param(
     [Parameter()]
     [ValidateSet("core", "full")]
-    [string]$DeploymentProfile = "core"
+    [string]$DeploymentProfile = "core",
+    [Parameter()]
+    [switch]$IncludeSimulation = $false
 )
 
 $basedir = $PWD
@@ -14,15 +16,21 @@ if (!(Test-Path $infrastructurePath)) {
 
 Push-Location $infrastructurePath
 
-Write-Host "Starting Octo infrastructure with profile: $DeploymentProfile" -ForegroundColor Cyan
+$profileInfo = $DeploymentProfile
+if ($IncludeSimulation) { $profileInfo += " + simulation" }
+Write-Host "Starting Octo infrastructure with profile: $profileInfo" -ForegroundColor Cyan
+
+$composeArgs = @("compose", "--env-file", ".env", "--env-file", ".env.local")
 if ($DeploymentProfile -eq "full")
 {
-    docker compose --env-file .env --env-file .env.local --profile full up -d
+    $composeArgs += @("--profile", "full")
 }
-else
+if ($IncludeSimulation)
 {
-    docker compose --env-file .env --env-file .env.local up -d
+    $composeArgs += @("--profile", "simulation")
 }
+$composeArgs += @("up", "-d")
+& docker @composeArgs
 
 Pop-Location
 
