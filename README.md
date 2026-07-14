@@ -152,6 +152,7 @@ If you installed with `-DeploymentProfile full`, run the following command after
 - OctoMesh Repository Playground for system tenant: https://localhost:5001/tenants/octosystem/graphql/playground
 - OctoMesh Data Refinery Studio: https://localhost:5011/
 - OctoMesh Bot Dashboard: https://localhost:5009/ui/jobs
+- OctoMesh Platform Services (configuration discovery): https://localhost:5025/octosystem/_configuration
 - OctoMesh Simulation Adapter: https://localhost:5023/ (when using `-IncludeSimulation`)
 
 # Further Reading

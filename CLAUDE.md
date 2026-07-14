@@ -70,6 +70,7 @@ The platform runs as Docker containers orchestrated by `scripts/octo-mesh/docker
   - Asset Repository Services (port 5001)
   - Bot Services (port 5009)
   - Communication Controller Services (port 5015)
+  - Platform Services (port 5025)
   - Mesh Adapter (port 5021)
   - Reporting Services (port 5007) - full profile only
   - Data Refinery Studio (port 5011) - full profile only
@@ -99,5 +100,6 @@ The platform runs as Docker containers orchestrated by `scripts/octo-mesh/docker
 - Identity Services: https://octo-identity-services:5003/
 - GraphQL Playground: https://localhost:5001/tenants/octosystem/graphql/playground
 - Bot Dashboard: https://localhost:5009/ui/jobs
+- Platform Services (configuration discovery): https://localhost:5025/octosystem/_configuration
 - Data Refinery Studio: https://localhost:5011/ (full profile)
 - Simulation Adapter: https://localhost:5023/ (`-IncludeSimulation`)
