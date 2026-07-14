@@ -150,7 +150,6 @@ If you installed with `-DeploymentProfile full`, run the following command after
 ## URIS
 - OctoMesh Identity Services: https://octo-identity-services:5003/
 - OctoMesh Repository Playground for system tenant: https://localhost:5001/tenants/octosystem/graphql/playground
-- OctoMesh Admin Panel: https://localhost:5005/
 - OctoMesh Data Refinery Studio: https://localhost:5011/
 - OctoMesh Bot Dashboard: https://localhost:5009/ui/jobs
 - OctoMesh Simulation Adapter: https://localhost:5023/ (when using `-IncludeSimulation`)
