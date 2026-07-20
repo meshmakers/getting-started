@@ -47,7 +47,7 @@ Write-Host "Deploying the pool (operator creates the CommunicationPool resource)
 Invoke-OctoCli -CliArgs @("-c", "DeployPool", "-id", $PoolRtId) -FailureHint "Requires octo-cli with the DeployPool command."
 
 Write-Host "Deploying the mesh adapter..." -ForegroundColor Cyan
-Invoke-OctoCli -CliArgs @("-c", "DeployWorkload", "-id", $MeshAdapterRtId) -FailureHint ""
+Invoke-OctoCli -CliArgs @("-c", "DeployWorkload", "-id", $MeshAdapterRtId) -FailureHint "Check 'octo-cli -c GetAdapters' for deployment errors."
 
 if ($IncludeSimulation) {
     Write-Host "Importing and deploying the simulation adapter..." -ForegroundColor Cyan
@@ -55,14 +55,15 @@ if ($IncludeSimulation) {
     $importFile = Join-Path $PSScriptRoot "kubernetes/.generated/simulation-adapter.yaml"
     $template -replace "__CHART_VERSION__", $config.chartVersion | Set-Content -Path $importFile -Encoding UTF8
     Invoke-OctoCli -CliArgs @("-c", "ImportRt", "-f", $importFile, "-w") -FailureHint "Simulation adapter import failed."
-    Invoke-OctoCli -CliArgs @("-c", "DeployWorkload", "-id", $SimulationAdapterRtId) -FailureHint ""
+    Invoke-OctoCli -CliArgs @("-c", "DeployWorkload", "-id", $SimulationAdapterRtId) -FailureHint "Check 'octo-cli -c GetAdapters' for deployment errors."
 }
 
 Write-Host "Waiting for adapter pods (up to 5 minutes)..." -ForegroundColor Cyan
 $deadline = (Get-Date).AddMinutes(5)
 while ((Get-Date) -lt $deadline) {
     $pods = kubectl --context $KubeContext -n octo get pods --no-headers 2>$null | Out-String
-    if ($pods -match "Running") { break }
+    $adapterLines = $pods -split "`n" | Where-Object { $_ -match "^$TenantId-" }
+    if ($adapterLines | Where-Object { $_ -match "Running" }) { break }
     Start-Sleep -Seconds 10
 }
 kubectl --context $KubeContext -n octo get communicationpool,pods
