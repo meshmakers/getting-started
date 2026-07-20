@@ -222,6 +222,7 @@ function New-KindCluster {
 function Install-Infrastructure {
     Write-Host "Installing infrastructure (MongoDB, RabbitMQ, CrateDB)..." -ForegroundColor Cyan
     kubectl --context $KubeContext apply -f (Join-Path $KubernetesPath "namespaces.yaml")
+    if ($LASTEXITCODE -ne 0) { throw "kubectl apply of namespaces.yaml failed." }
 
     # MongoDB keyfile secret (generated once, reused on re-runs)
     $keyFile = Join-Path $GeneratedPath "file.key"
@@ -232,17 +233,25 @@ function Install-Infrastructure {
     }
     kubectl --context $KubeContext -n octo-infra create secret generic mongodb-keyfile `
         --from-file=file.key=$keyFile --dry-run=client -o yaml | kubectl --context $KubeContext apply -f -
+    if ($LASTEXITCODE -ne 0) { throw "Applying the mongodb-keyfile secret failed." }
     $mongoInitPath = Join-Path $KubernetesPath "infra/mongo-init"
     kubectl --context $KubeContext -n octo-infra create configmap mongodb-init `
         --from-file=$mongoInitPath --dry-run=client -o yaml | kubectl --context $KubeContext apply -f -
+    if ($LASTEXITCODE -ne 0) { throw "Applying the mongodb-init configmap failed." }
 
     kubectl --context $KubeContext apply -f (Join-Path $KubernetesPath "infra/rabbitmq.yaml")
+    if ($LASTEXITCODE -ne 0) { throw "kubectl apply of infra/rabbitmq.yaml failed." }
     kubectl --context $KubeContext apply -f (Join-Path $KubernetesPath "infra/cratedb.yaml")
+    if ($LASTEXITCODE -ne 0) { throw "kubectl apply of infra/cratedb.yaml failed." }
     kubectl --context $KubeContext apply -f (Join-Path $KubernetesPath "infra/mongodb.yaml")
+    if ($LASTEXITCODE -ne 0) { throw "kubectl apply of infra/mongodb.yaml failed." }
 
     kubectl --context $KubeContext -n octo-infra rollout status statefulset/mongodb --timeout=300s
+    if ($LASTEXITCODE -ne 0) { throw "MongoDB did not become ready within 300s - check 'kubectl --context kind-octomesh -n octo-infra get pods'." }
     kubectl --context $KubeContext -n octo-infra rollout status deployment/rabbitmq --timeout=300s
+    if ($LASTEXITCODE -ne 0) { throw "RabbitMQ did not become ready within 300s - check 'kubectl --context kind-octomesh -n octo-infra get pods'." }
     kubectl --context $KubeContext -n octo-infra rollout status statefulset/cratedb --timeout=300s
+    if ($LASTEXITCODE -ne 0) { throw "CrateDB did not become ready within 300s - check 'kubectl --context kind-octomesh -n octo-infra get pods'." }
 
     # Initialize the replica set and the admin user (both scripts are idempotent).
     Write-Host "Initializing MongoDB replica set..."
@@ -278,12 +287,15 @@ function Install-IngressAndCertManager {
     if ($LASTEXITCODE -ne 0) { throw "cert-manager install failed." }
 
     kubectl --context $KubeContext apply -f (Join-Path $KubernetesPath "cluster-issuer.yaml")
+    if ($LASTEXITCODE -ne 0) { throw "kubectl apply of cluster-issuer.yaml failed." }
     kubectl --context $KubeContext wait --for=condition=Ready clusterissuer/mm-cloud-issuer --timeout=120s
+    if ($LASTEXITCODE -ne 0) { throw "ClusterIssuer mm-cloud-issuer did not become Ready within 120s - check 'kubectl --context kind-octomesh describe clusterissuer mm-cloud-issuer'." }
 
     # Export the root CA for OS trust and for chart rootCa values.
     $caPath = Join-Path $GeneratedPath "local-root-ca.crt"
     $caB64 = kubectl --context $KubeContext -n cert-manager get secret local-root-ca-tls -o jsonpath='{.data.ca\.crt}'
     if (-not $caB64) { $caB64 = kubectl --context $KubeContext -n cert-manager get secret local-root-ca-tls -o jsonpath='{.data.tls\.crt}' }
+    if ([string]::IsNullOrWhiteSpace($caB64)) { throw "Could not read the root CA from secret local-root-ca-tls - is cert-manager healthy?" }
     [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($caB64)) | Set-Content -Path $caPath -NoNewline -Encoding ascii
     Write-Host "Root CA exported to $caPath"
 }
