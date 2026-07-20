@@ -16,10 +16,6 @@ controller:
   # octo-mesh ingress install fails with "configuration-snippet annotation
   # cannot be used".
   allowSnippetAnnotations: true
-  # ingress-nginx 1.12+ additionally runs a structural annotation-format
-  # validation pass; disabled here since it is orthogonal to the risk-level
-  # check below and not needed for this trusted local cluster.
-  enableAnnotationValidations: false
   # ingress-nginx 1.15+'s admission webhook separately classifies snippet
   # *content* by risk level (independent of allowSnippetAnnotations and
   # enableAnnotationValidations above) and rejects more_set_headers with

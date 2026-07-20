@@ -367,9 +367,9 @@ function New-SigningKey {
     Write-Host "Generating IdentityServer signing key..." -ForegroundColor Cyan
     $keyPath = Join-Path $GeneratedPath "IdentityServer4Auth.key"
     $crtPath = Join-Path $GeneratedPath "IdentityServer4Auth.crt"
-    openssl req -x509 -newkey rsa:2048 -sha256 -keyout $keyPath -out $crtPath -subj "/CN=octomesh-signing" -days 10950 -passout pass:Secret01
+    openssl req -x509 -newkey rsa:2048 -sha256 -keyout $keyPath -out $crtPath -subj "/CN=octomesh-signing" -days 10950 -passout pass:Secret01 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "openssl signing-cert generation failed." }
-    openssl pkcs12 -export -out $pfxPath -inkey $keyPath -in $crtPath -passin pass:Secret01 -passout pass:Secret01
+    openssl pkcs12 -export -out $pfxPath -inkey $keyPath -in $crtPath -passin pass:Secret01 -passout pass:Secret01 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "openssl pkcs12 export failed." }
     return $pfxPath
 }
@@ -397,6 +397,11 @@ function Install-OctoMesh {
 
     $pfxPath = New-SigningKey
     $caPath = Join-Path $GeneratedPath "local-root-ca.crt"
+
+    # Forward slashes in --set-file paths (helm on Windows chokes on backslashes) -
+    # see Install-Operator's comment for details.
+    $pfxArg = $pfxPath -replace '\\', '/'
+    $caArg = $caPath -replace '\\', '/'
 
     # Secrets via a temporary JSON values file (avoids --set escaping issues) -
     # the same pattern the managed-environment deployment uses.
@@ -426,8 +431,8 @@ function Install-OctoMesh {
             --namespace octo `
             --values (Join-Path $KubernetesPath "values/octo-mesh-values.yaml") `
             --values $secretsFile `
-            --set-file services.identity.signingKey.key=$pfxPath `
-            --set-file secrets.rootCa=$caPath `
+            --set-file services.identity.signingKey.key=$pfxArg `
+            --set-file secrets.rootCa=$caArg `
             --set services.studio.deploy=$studioDeploy `
             --kube-context $KubeContext --timeout 10m
         if ($LASTEXITCODE -ne 0) { throw "octo-mesh install failed." }
@@ -448,6 +453,9 @@ function Install-Reporting {
     if ($DeploymentProfile -ne "full") { return }
     Write-Host "Installing reporting chart (octo-mesh-reporting $($config.chartVersion))..." -ForegroundColor Cyan
     $caPath = Join-Path $GeneratedPath "local-root-ca.crt"
+    # Forward slashes in --set-file paths (helm on Windows chokes on backslashes) -
+    # see Install-Operator's comment for details.
+    $caArg = $caPath -replace '\\', '/'
     $secretsFile = Join-Path $GeneratedPath "reporting-secrets.json"
     @{
         secrets = @{
@@ -463,7 +471,7 @@ function Install-Reporting {
             --namespace octo `
             --values (Join-Path $KubernetesPath "values/reporting-values.yaml") `
             --values $secretsFile `
-            --set-file secrets.rootCa=$caPath `
+            --set-file secrets.rootCa=$caArg `
             --kube-context $KubeContext --timeout 10m
         if ($LASTEXITCODE -ne 0) { throw "octo-mesh-reporting install failed." }
     }
