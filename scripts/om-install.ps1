@@ -118,15 +118,21 @@ function Test-PortsFree {
     return $true
 }
 
-function Get-OctoMeshReleases {
-    # Returns the octo-mesh chart entries (chart version + appVersion) from the
-    # public release index, newest first.
+function Get-ChartIndexContent {
+    # Fetches the public release index once; callers reuse the returned content to
+    # parse entries for multiple charts instead of re-fetching per chart.
     Write-Host "Fetching available OctoMesh versions..."
     $response = Invoke-WebRequest -Uri "$ChartRepo/index.yaml" -UseBasicParsing
+    return $response.Content
+}
+
+function Get-ChartReleases([string]$IndexContent, [string]$ChartName) {
+    # Returns the named chart's entries (chart version + appVersion) parsed out of an
+    # already-fetched index.yaml content string, newest first.
     $releases = [System.Collections.Generic.List[object]]::new()
-    $entries = $response.Content -split "(?=- apiVersion:)"
+    $entries = $IndexContent -split "(?=- apiVersion:)"
     foreach ($entry in $entries) {
-        if ($entry -match "(?m)^\s*name:\s*octo-mesh\s*$" -and
+        if ($entry -match "(?m)^\s*name:\s*$([regex]::Escape($ChartName))\s*$" -and
             $entry -match "(?m)^\s*version:\s*([0-9]+\.[0-9]+\.[0-9]+)\s*$" -and
             $entry -match "(?m)^\s*appVersion:\s*([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\s*$") {
             $chartVer = [regex]::Match($entry, "(?m)^\s*version:\s*([0-9]+\.[0-9]+\.[0-9]+)\s*$").Groups[1].Value
@@ -137,6 +143,41 @@ function Get-OctoMeshReleases {
         }
     }
     return $releases | Sort-Object { [Version]$_.ChartVersion } -Descending
+}
+
+function Get-OctoMeshReleases {
+    # Returns the octo-mesh chart entries (chart version + appVersion) from the
+    # public release index, newest first.
+    return Get-ChartReleases -IndexContent (Get-ChartIndexContent) -ChartName "octo-mesh"
+}
+
+# Charts that ship alongside octo-mesh but are versioned independently in the same
+# release index - a picked octo-mesh chart version is not guaranteed to also exist
+# for these, so Initialize-Configuration cross-checks the selection against all of them.
+$CompanionCharts = @("octo-mesh-reporting", "octo-mesh-adapter", "octo-plug-simulation")
+
+function Get-MissingCompanionCharts([string]$IndexContent, [string]$ChartVersion) {
+    # Returns the names of companion charts that do NOT publish $ChartVersion.
+    $missing = [System.Collections.Generic.List[string]]::new()
+    foreach ($chartName in $CompanionCharts) {
+        $companionReleases = Get-ChartReleases -IndexContent $IndexContent -ChartName $chartName
+        if (-not ($companionReleases | Where-Object { $_.ChartVersion -eq $ChartVersion })) {
+            $missing.Add($chartName)
+        }
+    }
+    return $missing
+}
+
+function Get-CompanionChartMismatchMessage([string]$ChartVersion, [string[]]$MissingCharts) {
+    return "Version $ChartVersion is not available for: $($MissingCharts -join ', '). Choose a version published for all charts (the default/latest usually is)."
+}
+
+function Assert-CompanionChartVersions([string]$IndexContent, [string]$ChartVersion) {
+    # Non-interactive paths (-ChartVersion / -NonInteractive): fail hard on a mismatch.
+    $missing = Get-MissingCompanionCharts -IndexContent $IndexContent -ChartVersion $ChartVersion
+    if ($missing.Count -gt 0) {
+        throw (Get-CompanionChartMismatchMessage -ChartVersion $ChartVersion -MissingCharts $missing)
+    }
 }
 
 function Read-MaskedInput([string]$prompt) {
@@ -155,18 +196,24 @@ function Initialize-Configuration {
 
     # Version selection
     if ($ChartVersion) {
-        $releases = Get-OctoMeshReleases
+        $indexContent = Get-ChartIndexContent
+        $releases = Get-ChartReleases -IndexContent $indexContent -ChartName "octo-mesh"
         $selected = $releases | Where-Object { $_.ChartVersion -eq $ChartVersion } | Select-Object -First 1
         if (-not $selected) { throw "Chart version '$ChartVersion' not found in $ChartRepo" }
+        Assert-CompanionChartVersions -IndexContent $indexContent -ChartVersion $selected.ChartVersion
     }
     elseif ($config.chartVersion -and $NonInteractive) {
+        $indexContent = Get-ChartIndexContent
         $selected = [pscustomobject]@{ ChartVersion = $config.chartVersion; AppVersion = $config.appVersion }
+        Assert-CompanionChartVersions -IndexContent $indexContent -ChartVersion $selected.ChartVersion
     }
     else {
-        $releases = Get-OctoMeshReleases
+        $indexContent = Get-ChartIndexContent
+        $releases = Get-ChartReleases -IndexContent $indexContent -ChartName "octo-mesh"
         if ($releases.Count -eq 0) { throw "Could not fetch versions from $ChartRepo. Check your internet connection." }
         if ($NonInteractive) {
             $selected = $releases[0]
+            Assert-CompanionChartVersions -IndexContent $indexContent -ChartVersion $selected.ChartVersion
         }
         else {
             Write-Host ""
@@ -176,9 +223,35 @@ function Initialize-Configuration {
                 $marker = if ($i -eq 0) { " [default]" } else { "" }
                 Write-Host "  [$($i + 1)] $($display[$i].AppVersion)$marker"
             }
-            $versionInput = Read-Host "Select version (press Enter for default: $($display[0].AppVersion))"
-            $selected = if ([string]::IsNullOrWhiteSpace($versionInput)) { $display[0] }
-                        else { $display[[int]$versionInput - 1] }
+            Write-Host "  [0] Enter custom version"
+            $selected = $null
+            while (-not $selected) {
+                $versionInput = Read-Host "Select version (press Enter for default: $($display[0].AppVersion))"
+                if ([string]::IsNullOrWhiteSpace($versionInput)) {
+                    $candidate = $display[0]
+                }
+                elseif ($versionInput -eq "0") {
+                    $customVersion = Read-Host "Enter custom version (e.g., 3.4.46.0)"
+                    $candidate = $releases | Where-Object { $_.AppVersion -eq $customVersion } | Select-Object -First 1
+                    if (-not $candidate) {
+                        Write-Host "Custom version '$customVersion' was not found in the release list." -ForegroundColor Red
+                        continue
+                    }
+                }
+                elseif ($versionInput -match "^[0-9]+$" -and [int]$versionInput -ge 1 -and [int]$versionInput -le $display.Count) {
+                    $candidate = $display[[int]$versionInput - 1]
+                }
+                else {
+                    Write-Host "Invalid selection." -ForegroundColor Red
+                    continue
+                }
+                $missing = Get-MissingCompanionCharts -IndexContent $indexContent -ChartVersion $candidate.ChartVersion
+                if ($missing.Count -gt 0) {
+                    Write-Host (Get-CompanionChartMismatchMessage -ChartVersion $candidate.ChartVersion -MissingCharts $missing) -ForegroundColor Red
+                    continue
+                }
+                $selected = $candidate
+            }
         }
     }
     $config.chartVersion = $selected.ChartVersion
@@ -334,20 +407,28 @@ function Add-CaTrust {
     }
     $caPath = Join-Path $GeneratedPath "local-root-ca.crt"
     Write-Host "Trusting the local root CA in the OS store (may prompt for sudo/elevation)..." -ForegroundColor Cyan
-    if ($IsMacOS) {
-        sudo security delete-certificate -c $RootCaCommonName /Library/Keychains/System.keychain 2>$null
-        sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain $caPath
+    try {
+        if ($IsMacOS) {
+            sudo security delete-certificate -c $RootCaCommonName /Library/Keychains/System.keychain 2>$null
+            sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain $caPath
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "CA trust failed (non-fatal). You can trust $caPath manually or continue with browser warnings." -ForegroundColor Yellow
+            }
+        }
+        elseif ($IsWindows) {
+            Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -match [regex]::Escape($RootCaCommonName) } | Remove-Item -ErrorAction SilentlyContinue
+            Import-Certificate -FilePath $caPath -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+        }
+        else {
+            sudo cp $caPath /usr/local/share/ca-certificates/octomesh-getting-started-root-ca.crt
+            sudo update-ca-certificates
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "CA trust failed (non-fatal). You can trust $caPath manually or continue with browser warnings." -ForegroundColor Yellow
+            }
+        }
     }
-    elseif ($IsWindows) {
-        Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -match [regex]::Escape($RootCaCommonName) } | Remove-Item -ErrorAction SilentlyContinue
-        Import-Certificate -FilePath $caPath -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
-    }
-    else {
-        sudo cp $caPath /usr/local/share/ca-certificates/octomesh-getting-started-root-ca.crt
-        sudo update-ca-certificates
-    }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "CA trust failed (non-fatal). You can trust $caPath manually or continue with browser warnings." -ForegroundColor Yellow
+    catch {
+        Write-Host "CA trust failed (non-fatal): $($_.Exception.Message). You can trust $caPath manually or re-run without -SkipTrustCa later." -ForegroundColor Yellow
     }
 }
 
@@ -447,6 +528,11 @@ function Install-OctoMesh {
     }
     # Fallback wait that does not depend on label naming: all pods in ns octo ready.
     kubectl --context $KubeContext -n octo wait --for=condition=Ready pods --all --timeout=600s
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Not all platform pods became Ready within 10 minutes." -ForegroundColor Yellow
+        Write-Host "Check './om-status.ps1' and 'kubectl --context $KubeContext -n octo describe pods' for details." -ForegroundColor Yellow
+        Write-Host "(On hosts without amd64 support this is expected until multi-arch images are published.)" -ForegroundColor Yellow
+    }
 }
 
 function Install-Reporting {
