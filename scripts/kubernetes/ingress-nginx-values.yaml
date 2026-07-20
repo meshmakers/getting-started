@@ -1,0 +1,18 @@
+# ingress-nginx for the local kind cluster. NodePort 30080/30443 are mapped to
+# host 80/443 by kubernetes/kind-cluster.yaml. Mirrors staging (chart 4.15.1,
+# class "nginx") with NodePort instead of LoadBalancer.
+controller:
+  ingressClassResource:
+    name: nginx
+    enabled: true
+    default: true
+  ingressClass: nginx
+  watchIngressWithoutClass: true
+  replicaCount: 1
+  service:
+    type: NodePort
+    nodePorts:
+      http: 30080
+      https: 30443
+  admissionWebhooks:
+    enabled: true

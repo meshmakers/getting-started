@@ -409,3 +409,7 @@ FodyWeavers.xsd
 /scripts/infrastructure/*.csr
 /scripts/infrastructure/*.key
 /scripts/infrastructure/*.pem
+
+# kind/helm deployment — generated local artifacts (certs, keys, CA, config)
+scripts/kubernetes/.generated/
+scripts/kubernetes/local-config.json

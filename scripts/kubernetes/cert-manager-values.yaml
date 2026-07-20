@@ -1,0 +1,6 @@
+# cert-manager for the local kind cluster (jetstack chart v1.20.2). CRDs are
+# installed by the chart so no separate kubectl apply of cert-manager.crds.yaml
+# is needed.
+crds:
+  enabled: true
+replicaCount: 1

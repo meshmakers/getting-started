@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: octo-infra
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: octo
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: octo-operator-system

@@ -1,0 +1,50 @@
+# Static values for the published octo-mesh-communication-operator chart.
+# Webhook certificates and the root CA are passed by om-install.ps1 via --set-file.
+
+# CRDs are installed as a separate chart (octo-mesh-crds) before the platform.
+octo-mesh-crds:
+  enabled: false
+
+operator:
+  # Central mode: the operator owns pool CRs and helm-installs adapter workloads.
+  autoManagePools: true
+  poolNamespace: octo
+  defaultPoolName: default
+  # In-cluster route to the controller goes through the public URI: CoreDNS
+  # rewrites *.127-0-0-1.nip.io to ingress-nginx, and the root CA (secrets.rootCa)
+  # makes the operator trust the local certificate.
+  communicationControllerUri: "https://communication.127-0-0-1.nip.io"
+  adapterIgnoreCertificateValidation: false
+  # Empty registry: workload images are pulled from public Docker Hub.
+  imageRegistry: ""
+  clusterDependencies:
+    mongodbHost: "mongodb-0.mongodb.octo-infra.svc.cluster.local:27017"
+    mongodbReplicaSet: "rs"
+    rabbitMqHost: "rabbitmq.octo-infra.svc.cluster.local"
+    rabbitMqUser: "guest"
+    streamDataHost: "cratedb.octo-infra.svc.cluster.local"
+    streamDataUser: "crate"
+  clusterSecrets:
+    mongodbUserPassword: "OctoUser1"
+    mongodbAdminPassword: "OctoAdmin1"
+    # CrateDB runs auth-less locally, but adapter charts require the secret.
+    streamDataPassword: "OctoStream1"
+  # Ingress defaults projected into every operator-deployed workload.
+  ingress:
+    className: nginx
+    clusterIssuer: mm-cloud-issuer
+    tls: true
+
+broker:
+  host: "rabbitmq.octo-infra.svc.cluster.local"
+  username: "guest"
+  password: "guest"
+
+# The operator forks the helm CLI per workload deploy; the default 128Mi limit OOM-kills.
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi

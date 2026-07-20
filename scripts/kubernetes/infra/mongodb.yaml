@@ -1,0 +1,82 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  namespace: octo-infra
+  labels: { app: mongodb }
+spec:
+  clusterIP: None
+  selector: { app: mongodb }
+  ports:
+    - { name: mongo, port: 27017, targetPort: 27017 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-ext
+  namespace: octo-infra
+spec:
+  type: NodePort
+  selector: { app: mongodb }
+  ports:
+    - { name: mongo, port: 27017, targetPort: 27017, nodePort: 30017 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+  namespace: octo-infra
+spec:
+  serviceName: mongodb
+  replicas: 1
+  selector: { matchLabels: { app: mongodb } }
+  template:
+    metadata: { labels: { app: mongodb } }
+    spec:
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+      initContainers:
+        - name: copy-keyfile
+          image: mongo:8.0.12
+          command:
+            - "sh"
+            - "-c"
+            - "cp /secret/file.key /keyfile/file.key && chmod 400 /keyfile/file.key && chown 999:999 /keyfile/file.key"
+          securityContext: { runAsUser: 0 }
+          volumeMounts:
+            - { name: keyfile-secret, mountPath: /secret, readOnly: true }
+            - { name: keyfile, mountPath: /keyfile }
+      containers:
+        - name: mongodb
+          image: mongo:8.0.12
+          command:
+            - "mongod"
+            - "--keyFile"
+            - "/keyfile/file.key"
+            - "--replSet"
+            - "rs"
+            - "--bind_ip_all"
+            - "--wiredTigerCacheSizeGB"
+            - "2"
+          ports:
+            - { containerPort: 27017, name: mongo }
+          volumeMounts:
+            - { name: keyfile, mountPath: /keyfile }
+            - { name: data, mountPath: /data/db }
+            - { name: init, mountPath: /scripts }
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "mongosh --quiet --eval 'db.adminCommand({ ping: 1 })'"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - { name: keyfile-secret, secret: { secretName: mongodb-keyfile } }
+        - { name: keyfile, emptyDir: {} }
+        - { name: init, configMap: { name: mongodb-init } }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 5Gi } }
