@@ -1,0 +1,33 @@
+$schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+entities:
+  - rtId: '671000000000000000000001'
+    ckTypeId: System.Communication/Adapter
+    rtWellKnownName: SimulationAdapter
+    associations:
+      - roleId: System.Communication/Manages
+        targetRtId: '670000000000000000000001'
+        targetCkTypeId: System.Communication/Pool
+      - roleId: System.Communication/HelmRepository
+        targetRtId: '670000000000000000000004'
+        targetCkTypeId: System.Communication/HelmRepositoryConfiguration
+    attributes:
+      - id: System/Name
+        value: Simulation Adapter
+      - id: System/Description
+        value: >-
+          Simulation adapter for the getting-started quickstart. Deployed by the
+          Communication Operator from the public release chart repo.
+      - id: System.Communication/ChartName
+        value: octo-plug-simulation
+      - id: System.Communication/ChartVersion
+        value: "__CHART_VERSION__"
+      - id: System.Communication/DeploymentState
+        value: 0
+      - id: System.Communication/CommunicationState
+        value: 0
+      - id: System.Communication/ConfigurationState
+        value: 0
+      - id: System.Communication/LastSyncedSequenceNumber
+        value: 0
+      - id: System.Communication/ReceivesClusterSecrets
+        value: false

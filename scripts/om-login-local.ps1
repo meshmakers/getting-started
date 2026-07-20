@@ -1,13 +1,19 @@
-param($tenantId = "meshtest", $includeReporting = $false)
+#!/usr/bin/env pwsh
+# Configures octo-cli for the local kind installation and logs in interactively.
+param(
+    $tenantId = "meshtest",
+    $includeReporting = $false
+)
+
+$ErrorActionPreference = "Stop"
+$base = "127-0-0-1.nip.io"
 
 if ($includeReporting) {
     Write-Host "Including reporting"
-    octo-cli -c Config -asu "https://localhost:5001/" -isu "https://octo-identity-services:5003/" -bsu "https://localhost:5009/" -csu "https://localhost:5015/" -rsu "https://localhost:5007/" -tid $tenantId
+    octo-cli -c Config -asu "https://assets.$base/" -isu "https://identity.$base/" -bsu "https://bots.$base/" -csu "https://communication.$base/" -rsu "https://reporting.$base/" -tid $tenantId
 }
 else {
-    Write-Host "Excluding reporting"
-    octo-cli -c Config -asu "https://localhost:5001/" -isu "https://octo-identity-services:5003/" -bsu "https://localhost:5009/" -csu "https://localhost:5015/" -tid $tenantId
+    octo-cli -c Config -asu "https://assets.$base/" -isu "https://identity.$base/" -bsu "https://bots.$base/" -csu "https://communication.$base/" -tid $tenantId
 }
 octo-cli -c Login -i
-
 
