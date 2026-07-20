@@ -361,4 +361,180 @@ Install-IngressAndCertManager
 Set-CoreDnsRewrite
 Add-CaTrust
 
-# ---- platform phase (Task 6) ----
+function New-SigningKey {
+    $pfxPath = Join-Path $GeneratedPath "IdentityServer4Auth.pfx"
+    if (Test-Path $pfxPath) { return $pfxPath }
+    Write-Host "Generating IdentityServer signing key..." -ForegroundColor Cyan
+    $keyPath = Join-Path $GeneratedPath "IdentityServer4Auth.key"
+    $crtPath = Join-Path $GeneratedPath "IdentityServer4Auth.crt"
+    openssl req -x509 -newkey rsa:2048 -sha256 -keyout $keyPath -out $crtPath -subj "/CN=octomesh-signing" -days 10950 -passout pass:Secret01
+    if ($LASTEXITCODE -ne 0) { throw "openssl signing-cert generation failed." }
+    openssl pkcs12 -export -out $pfxPath -inkey $keyPath -in $crtPath -passin pass:Secret01 -passout pass:Secret01
+    if ($LASTEXITCODE -ne 0) { throw "openssl pkcs12 export failed." }
+    return $pfxPath
+}
+
+function Get-InstanceSecretKey {
+    # AES-256-GCM master key for workload secret encryption. Generated once and
+    # persisted - rotating it would orphan encrypted workload secrets.
+    if (-not $config.communicationInstanceSecretKey) {
+        $bytes = [byte[]]::new(32)
+        [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+        $config.communicationInstanceSecretKey = [Convert]::ToBase64String($bytes)
+        $config | ConvertTo-Json | Set-Content -Path $ConfigPath -Encoding UTF8
+    }
+    return $config.communicationInstanceSecretKey
+}
+
+function Install-OctoMesh {
+    Write-Host "Installing OctoMesh platform chart (octo-mesh $($config.chartVersion))..." -ForegroundColor Cyan
+
+    helm upgrade --install octo-mesh-crds octo-mesh-crds `
+        --repo $ChartRepo --version $config.chartVersion `
+        --namespace octo-operator-system `
+        --kube-context $KubeContext --wait --timeout 2m
+    if ($LASTEXITCODE -ne 0) { throw "octo-mesh-crds install failed." }
+
+    $pfxPath = New-SigningKey
+    $caPath = Join-Path $GeneratedPath "local-root-ca.crt"
+
+    # Secrets via a temporary JSON values file (avoids --set escaping issues) -
+    # the same pattern the managed-environment deployment uses.
+    $secretsFile = Join-Path $GeneratedPath "octo-mesh-secrets.json"
+    @{
+        secrets = @{
+            databaseUser = "OctoUser1"
+            databaseAdmin = "OctoAdmin1"
+            rabbitmq = "guest"
+            streamDataPassword = "OctoStream1"
+            communicationInstanceSecretKey = Get-InstanceSecretKey
+        }
+        services = @{
+            identity = @{
+                signingKey = @{ password = "Secret01" }
+                identityServerLicenseKey = $config.identityServerLicenseKey
+                autoMapperLicenseKey = $config.autoMapperLicenseKey
+            }
+        }
+    } | ConvertTo-Json -Depth 5 | Set-Content -Path $secretsFile -Encoding UTF8
+
+    $studioDeploy = if ($DeploymentProfile -eq "full") { "true" } else { "false" }
+
+    try {
+        helm upgrade --install octo-mesh octo-mesh `
+            --repo $ChartRepo --version $config.chartVersion `
+            --namespace octo `
+            --values (Join-Path $KubernetesPath "values/octo-mesh-values.yaml") `
+            --values $secretsFile `
+            --set-file services.identity.signingKey.key=$pfxPath `
+            --set-file secrets.rootCa=$caPath `
+            --set services.studio.deploy=$studioDeploy `
+            --kube-context $KubeContext --timeout 10m
+        if ($LASTEXITCODE -ne 0) { throw "octo-mesh install failed." }
+    }
+    finally {
+        Remove-Item $secretsFile -ErrorAction SilentlyContinue
+    }
+
+    Write-Host "Waiting for platform services to become ready (image pulls may take several minutes)..."
+    foreach ($deploy in @("identity-services", "asset-rep-services", "bot-services", "communication-controller-services", "platform-services")) {
+        kubectl --context $KubeContext -n octo rollout status deployment -l "app.kubernetes.io/name=$deploy" --timeout=600s 2>$null
+    }
+    # Fallback wait that does not depend on label naming: all pods in ns octo ready.
+    kubectl --context $KubeContext -n octo wait --for=condition=Ready pods --all --timeout=600s
+}
+
+function Install-Reporting {
+    if ($DeploymentProfile -ne "full") { return }
+    Write-Host "Installing reporting chart (octo-mesh-reporting $($config.chartVersion))..." -ForegroundColor Cyan
+    $caPath = Join-Path $GeneratedPath "local-root-ca.crt"
+    $secretsFile = Join-Path $GeneratedPath "reporting-secrets.json"
+    @{
+        secrets = @{
+            databaseUser = "OctoUser1"
+            databaseAdmin = "OctoAdmin1"
+            rabbitmq = "guest"
+            streamDataPassword = "OctoStream1"
+        }
+    } | ConvertTo-Json -Depth 5 | Set-Content -Path $secretsFile -Encoding UTF8
+    try {
+        helm upgrade --install octo-mesh-reporting octo-mesh-reporting `
+            --repo $ChartRepo --version $config.chartVersion `
+            --namespace octo `
+            --values (Join-Path $KubernetesPath "values/reporting-values.yaml") `
+            --values $secretsFile `
+            --set-file secrets.rootCa=$caPath `
+            --kube-context $KubeContext --timeout 10m
+        if ($LASTEXITCODE -ne 0) { throw "octo-mesh-reporting install failed." }
+    }
+    finally {
+        Remove-Item $secretsFile -ErrorAction SilentlyContinue
+    }
+}
+
+function Install-Operator {
+    Write-Host "Installing Communication Operator ($($config.chartVersion))..." -ForegroundColor Cyan
+
+    # Admission webhook certificates (CA + server cert for the in-cluster service).
+    $webhookPath = Join-Path $GeneratedPath "operator-webhook"
+    New-Item -ItemType Directory -Path $webhookPath -Force | Out-Null
+    $caKey = Join-Path $webhookPath "ca.key"; $caCrt = Join-Path $webhookPath "ca.crt"
+    $svcKey = Join-Path $webhookPath "svc.key"; $svcCrt = Join-Path $webhookPath "svc.crt"
+    if (-not (Test-Path $svcCrt)) {
+        openssl req -x509 -newkey rsa:2048 -sha256 -nodes -keyout $caKey -out $caCrt -subj "/CN=communication-operator-ca" -days 3650
+        if ($LASTEXITCODE -ne 0) { throw "openssl webhook CA generation failed." }
+        openssl req -newkey rsa:2048 -nodes -keyout $svcKey -out (Join-Path $webhookPath "svc.csr") -subj "/CN=communication-operator.octo-operator-system.svc"
+        if ($LASTEXITCODE -ne 0) { throw "openssl webhook CSR generation failed." }
+        $extFile = Join-Path $webhookPath "san.cnf"
+        "subjectAltName=DNS:communication-operator.octo-operator-system.svc,DNS:communication-operator.octo-operator-system.svc.cluster.local" | Set-Content -Path $extFile -Encoding ascii
+        openssl x509 -req -in (Join-Path $webhookPath "svc.csr") -CA $caCrt -CAkey $caKey -CAcreateserial -out $svcCrt -days 3650 -extfile $extFile
+        if ($LASTEXITCODE -ne 0) { throw "openssl webhook cert signing failed." }
+    }
+
+    # Forward slashes in --set-file paths (helm on Windows chokes on backslashes),
+    # precomputed into plain variables (subexpressions inside kubectl/helm argument
+    # tokens do not parse reliably in PowerShell).
+    $caKeyArg = $caKey -replace '\\', '/'
+    $caCrtArg = $caCrt -replace '\\', '/'
+    $svcKeyArg = $svcKey -replace '\\', '/'
+    $svcCrtArg = $svcCrt -replace '\\', '/'
+    $rootCaArg = (Join-Path $GeneratedPath "local-root-ca.crt") -replace '\\', '/'
+    $operatorValues = Join-Path $KubernetesPath "values/operator-values.yaml"
+    helm upgrade --install communication-operator octo-mesh-communication-operator `
+        --repo $ChartRepo --version $config.chartVersion `
+        --namespace octo-operator-system `
+        --values $operatorValues `
+        --set-file serviceHooks.caKey=$caKeyArg `
+        --set-file serviceHooks.caCrt=$caCrtArg `
+        --set-file serviceHooks.svcKey=$svcKeyArg `
+        --set-file serviceHooks.svcCrt=$svcCrtArg `
+        --set-file secrets.rootCa=$rootCaArg `
+        --kube-context $KubeContext --wait --timeout 5m
+    if ($LASTEXITCODE -ne 0) { throw "communication-operator install failed." }
+}
+
+Install-OctoMesh
+Install-Reporting
+Install-Operator
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Green
+Write-Host "  Installation Complete!" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "Service URLs:" -ForegroundColor Cyan
+Write-Host "  Identity:            https://identity.$BaseDomain/"
+Write-Host "  Asset repository:    https://assets.$BaseDomain/tenants/octosystem/graphql/playground"
+Write-Host "  Bot dashboard:       https://bots.$BaseDomain/ui/jobs"
+Write-Host "  Platform services:   https://platform.$BaseDomain/octosystem/_configuration"
+if ($DeploymentProfile -eq "full") {
+    Write-Host "  Refinery Studio:     https://studio.$BaseDomain/"
+    Write-Host "  Reporting:           https://reporting.$BaseDomain/"
+}
+Write-Host ""
+Write-Host "Next steps:" -ForegroundColor Cyan
+Write-Host "  1. Open https://identity.$BaseDomain/ and register the admin user."
+Write-Host "  2. Run ./om-login-local.ps1 to configure and log in octo-cli."
+Write-Host "  3. Run ./om-bootstrap-tenant.ps1 to create a tenant and deploy the mesh adapter."
+Write-Host ""
+Write-Host "Manage the installation with ./om-status.ps1, ./om-stop.ps1, ./om-start.ps1, ./om-uninstall.ps1."
