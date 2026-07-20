@@ -39,6 +39,9 @@ if (-not $KeepCaTrust) {
         sudo rm -f /usr/local/share/ca-certificates/octomesh-getting-started-root-ca.crt
         sudo update-ca-certificates --fresh | Out-Null
     }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "CA trust removal failed (non-fatal). You may need to remove '$RootCaCommonName' from your OS trust store manually." -ForegroundColor Yellow
+    }
 }
 
 if (-not $KeepGeneratedFiles -and (Test-Path $GeneratedPath)) {
