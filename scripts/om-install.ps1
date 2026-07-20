@@ -1,762 +1,352 @@
+#!/usr/bin/env pwsh
+# Installs OctoMesh into a local kind cluster using the official Helm charts.
+# Requires: docker (running), kind, kubectl, helm, openssl, octo-cli, PowerShell 7.4+.
 param(
     [Parameter()]
     [ValidateSet("core", "full")]
     [string]$DeploymentProfile = "core",
     [Parameter()]
-    [switch]$IncludeSimulation = $false
+    [switch]$SkipTrustCa = $false,
+    # Non-interactive overrides (prompted when omitted):
+    [Parameter()]
+    [string]$ChartVersion,
+    [Parameter()]
+    [string]$IdentityServerLicenseKey,
+    [Parameter()]
+    [string]$AutoMapperLicenseKey,
+    [Parameter()]
+    [switch]$NonInteractive = $false
 )
 
-function Test-Prerequisites
-{
-    Write-Host ""
-    Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host "  Checking Prerequisites" -ForegroundColor Cyan
-    Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host ""
+$ErrorActionPreference = "Stop"
 
+$ClusterName = "octomesh"
+$KubeContext = "kind-$ClusterName"
+$ChartRepo = "https://meshmakers.github.io/charts"
+$BaseDomain = "127-0-0-1.nip.io"
+$KubernetesPath = Join-Path $PSScriptRoot "kubernetes"
+$GeneratedPath = Join-Path $KubernetesPath ".generated"
+$ConfigPath = Join-Path $KubernetesPath "local-config.json"
+$IngressNginxVersion = "4.15.1"
+$CertManagerVersion = "v1.20.2"
+$RootCaCommonName = "OctoMesh Getting Started Root CA"
+
+function Test-Prerequisites {
+    Write-Host ""
+    Write-Host "Checking prerequisites..." -ForegroundColor Cyan
     $allPassed = $true
 
-    # Check OpenSSL
-    Write-Host -NoNewline "Checking OpenSSL... "
-    if (Get-Command openssl -ErrorAction SilentlyContinue)
-    {
-        $opensslVersion = & openssl version 2>&1
-        Write-Host "OK ($opensslVersion)" -ForegroundColor Green
-    }
-    else
-    {
-        Write-Host "NOT FOUND" -ForegroundColor Red
-        Write-Host "  Please install OpenSSL and ensure it is available in PATH." -ForegroundColor Yellow
-        Write-Host "  Windows: winget install -e --id ShiningLight.OpenSSL.Dev" -ForegroundColor Yellow
-        Write-Host "  macOS: brew install openssl" -ForegroundColor Yellow
+    if ($PSVersionTable.PSVersion -lt [Version]"7.4") {
+        Write-Host "PowerShell 7.4+ required (found $($PSVersionTable.PSVersion))." -ForegroundColor Red
         $allPassed = $false
     }
 
-    # Check Docker
-    Write-Host -NoNewline "Checking Docker... "
-    if (Get-Command docker -ErrorAction SilentlyContinue)
-    {
-        $dockerRunning = docker info 2>&1
-        if ($LASTEXITCODE -eq 0)
-        {
-            $dockerVersion = & docker --version 2>&1
-            Write-Host "OK ($dockerVersion)" -ForegroundColor Green
+    foreach ($tool in @(
+        @{ Name = "docker";   Hint = "Install Docker Desktop: https://www.docker.com/products/docker-desktop/" },
+        @{ Name = "kind";     Hint = "Install kind: https://kind.sigs.k8s.io/docs/user/quick-start/#installation (brew install kind / winget install Kubernetes.kind)" },
+        @{ Name = "kubectl";  Hint = "Install kubectl: https://kubernetes.io/docs/tasks/tools/" },
+        @{ Name = "helm";     Hint = "Install helm v3: https://helm.sh/docs/intro/install/" },
+        @{ Name = "openssl";  Hint = "Install openssl (brew install openssl / winget install ShiningLight.OpenSSL.Dev)" },
+        @{ Name = "octo-cli"; Hint = "Install octo-cli: choco install octo-cli (see README for other platforms)" }
+    )) {
+        Write-Host -NoNewline ("  {0,-10} " -f $tool.Name)
+        if (Get-Command $tool.Name -ErrorAction SilentlyContinue) {
+            Write-Host "OK" -ForegroundColor Green
         }
-        else
-        {
-            Write-Host "NOT RUNNING" -ForegroundColor Red
-            Write-Host "  Docker is installed but not running. Please start Docker Desktop." -ForegroundColor Yellow
+        else {
+            Write-Host "NOT FOUND" -ForegroundColor Red
+            Write-Host "    $($tool.Hint)" -ForegroundColor Yellow
             $allPassed = $false
         }
     }
-    else
-    {
-        Write-Host "NOT FOUND" -ForegroundColor Red
-        Write-Host "  Please install Docker Desktop (4.29+)." -ForegroundColor Yellow
-        $allPassed = $false
+
+    if (Get-Command docker -ErrorAction SilentlyContinue) {
+        docker info 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  Docker is installed but not running. Start Docker Desktop first." -ForegroundColor Red
+            $allPassed = $false
+        }
     }
 
-    # Check octo-cli
-    Write-Host -NoNewline "Checking octo-cli... "
-    if (Get-Command octo-cli -ErrorAction SilentlyContinue)
-    {
-        Write-Host "OK" -ForegroundColor Green
-    }
-    else
-    {
-        Write-Host "NOT FOUND" -ForegroundColor Red
-        Write-Host "  Please install octo-cli: choco install octo-cli" -ForegroundColor Yellow
-        $allPassed = $false
+    # arm64 preflight warning: OctoMesh service images are currently amd64-only, so the
+    # platform phase (Task 6) will not start pods on an ARM Docker engine. Infrastructure
+    # (mongo/rabbitmq/crate/ingress-nginx/cert-manager) is multi-arch and works fine.
+    if (Get-Command docker -ErrorAction SilentlyContinue) {
+        $dockerArch = (docker info --format '{{.Architecture}}' 2>$null).Trim()
+        if ($dockerArch -in @("aarch64", "arm64")) {
+            Write-Host ""
+            Write-Host "WARNING: Docker engine architecture is $dockerArch (ARM)." -ForegroundColor Yellow
+            Write-Host "OctoMesh service images are currently amd64-only, so platform service pods will NOT" -ForegroundColor Yellow
+            Write-Host "start on this machine until multi-arch images are published. Infrastructure" -ForegroundColor Yellow
+            Write-Host "(MongoDB, RabbitMQ, CrateDB, ingress-nginx, cert-manager) works fine on ARM." -ForegroundColor Yellow
+            Write-Host "An amd64 host is required for the full quickstart." -ForegroundColor Yellow
+            if ($NonInteractive) {
+                Write-Host "Continuing (-NonInteractive)." -ForegroundColor Yellow
+            }
+            else {
+                $continue = Read-Host "Continue anyway? (y/N)"
+                if ($continue -ne "y" -and $continue -ne "Y") {
+                    Write-Host "Aborted." -ForegroundColor Red
+                    $allPassed = $false
+                }
+            }
+        }
     }
 
-    Write-Host ""
+    return $allPassed
+}
 
-    if (-not $allPassed)
-    {
-        Write-Host "Prerequisites check failed. Please install missing dependencies and try again." -ForegroundColor Red
+function Test-PortsFree {
+    # Only checked while the octomesh cluster does not exist yet - once it runs,
+    # these ports are legitimately taken by the cluster itself.
+    $existing = kind get clusters 2>$null
+    if ($existing -contains $ClusterName) { return $true }
+
+    $busy = @()
+    foreach ($port in @(80, 443, 27017, 5672, 15672, 5432, 4301)) {
+        if (Test-Connection -TargetName 127.0.0.1 -TcpPort $port -TimeoutSeconds 1 -Quiet) {
+            $busy += $port
+        }
+    }
+    if ($busy.Count -gt 0) {
+        Write-Host "Required host ports already in use: $($busy -join ', ')." -ForegroundColor Red
+        Write-Host "Likely causes: a leftover getting-started Docker Compose stack, the octo-tools" -ForegroundColor Yellow
+        Write-Host "developer kind cluster, or another local database/web server." -ForegroundColor Yellow
+        Write-Host "Stop the conflicting services and re-run ./om-install.ps1." -ForegroundColor Yellow
         return $false
     }
-
-    Write-Host "All prerequisites met!" -ForegroundColor Green
     return $true
 }
 
-function Wait-DockerContainer([string]$containerId)
-{
-    Write-Host "Waiting for docker container $containerId"
-
-    # Loop until the container is running
-    while ((docker inspect -f '{{.State.Status}}' $containerId) -ne "running")
-    {
-        Start-Sleep -Seconds 2
-        Write-Host Waiting more...
-    }
-}
-
-function Get-HelmChartVersions([string]$chartName)
-{
-    Write-Host "Fetching available versions for $chartName..."
-    try
-    {
-        $response = Invoke-WebRequest -Uri "https://meshmakers.github.io/charts/index.yaml" -UseBasicParsing
-        $content = $response.Content
-
-        $versions = [System.Collections.ArrayList]@()
-
-        # Split into individual chart entries (each starts with "- apiVersion:")
-        $entries = $content -split "(?=- apiVersion:)"
-
-        foreach ($entry in $entries)
-        {
-            # Check if this entry is for the exact chart name
-            if ($entry -match "name:\s*$chartName\s*$" -or $entry -match "name:\s*$chartName\s*[\r\n]")
-            {
-                # Ensure it's an exact match (not a substring like octo-mesh matching octo-mesh-reporting)
-                if ($entry -match "name:\s*$chartName-")
-                {
-                    continue
-                }
-
-                # Extract appVersion
-                if ($entry -match "appVersion:\s*([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)")
-                {
-                    $version = $matches[1]
-                    if (-not $versions.Contains($version))
-                    {
-                        [void]$versions.Add($version)
-                    }
-                }
+function Get-OctoMeshReleases {
+    # Returns the octo-mesh chart entries (chart version + appVersion) from the
+    # public release index, newest first.
+    Write-Host "Fetching available OctoMesh versions..."
+    $response = Invoke-WebRequest -Uri "$ChartRepo/index.yaml" -UseBasicParsing
+    $releases = [System.Collections.Generic.List[object]]::new()
+    $entries = $response.Content -split "(?=- apiVersion:)"
+    foreach ($entry in $entries) {
+        if ($entry -match "(?m)^\s*name:\s*octo-mesh\s*$" -and
+            $entry -match "(?m)^\s*version:\s*([0-9]+\.[0-9]+\.[0-9]+)\s*$" -and
+            $entry -match "(?m)^\s*appVersion:\s*([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\s*$") {
+            $chartVer = [regex]::Match($entry, "(?m)^\s*version:\s*([0-9]+\.[0-9]+\.[0-9]+)\s*$").Groups[1].Value
+            $appVer = [regex]::Match($entry, "(?m)^\s*appVersion:\s*([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\s*$").Groups[1].Value
+            if (-not ($releases | Where-Object { $_.ChartVersion -eq $chartVer })) {
+                $releases.Add([pscustomobject]@{ ChartVersion = $chartVer; AppVersion = $appVer })
             }
         }
-
-        # Sort versions descending (newest first)
-        $sortedVersions = $versions | Sort-Object { [Version]$_ } -Descending
-        return $sortedVersions
     }
-    catch
-    {
-        Write-Error "Failed to fetch versions for $chartName`: $_"
-        return @()
+    return $releases | Sort-Object { [Version]$_.ChartVersion } -Descending
+}
+
+function Read-MaskedInput([string]$prompt) {
+    Write-Host -NoNewline $prompt
+    $secure = Read-Host -AsSecureString
+    return [System.Net.NetworkCredential]::new("", $secure).Password
+}
+
+function Initialize-Configuration {
+    $config = @{}
+    if (Test-Path $ConfigPath) {
+        $existing = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+        $existing.PSObject.Properties | ForEach-Object { $config[$_.Name] = $_.Value }
+        Write-Host "Loaded existing configuration from local-config.json" -ForegroundColor Yellow
     }
-}
 
-function Get-OctoMeshVersions()
-{
-    return Get-HelmChartVersions -chartName "octo-mesh"
-}
-
-function Get-ReportingServicesVersions()
-{
-    return Get-HelmChartVersions -chartName "octo-mesh-reporting"
-}
-
-function Read-LicenseKey([string]$prompt)
-{
-    Write-Host -NoNewline "$prompt"
-    $key = ""
-    while ($true)
-    {
-        $keyInfo = [Console]::ReadKey($true)
-        if ($keyInfo.Key -eq 'Enter')
-        {
+    # Version selection
+    if ($ChartVersion) {
+        $releases = Get-OctoMeshReleases
+        $selected = $releases | Where-Object { $_.ChartVersion -eq $ChartVersion } | Select-Object -First 1
+        if (-not $selected) { throw "Chart version '$ChartVersion' not found in $ChartRepo" }
+    }
+    elseif ($config.chartVersion -and $NonInteractive) {
+        $selected = [pscustomobject]@{ ChartVersion = $config.chartVersion; AppVersion = $config.appVersion }
+    }
+    else {
+        $releases = Get-OctoMeshReleases
+        if ($releases.Count -eq 0) { throw "Could not fetch versions from $ChartRepo. Check your internet connection." }
+        if ($NonInteractive) {
+            $selected = $releases[0]
+        }
+        else {
             Write-Host ""
-            break
-        }
-        elseif ($keyInfo.Key -eq 'Backspace')
-        {
-            if ($key.Length -gt 0)
-            {
-                $key = $key.Substring(0, $key.Length - 1)
-                Write-Host -NoNewline "`b `b"
+            Write-Host "Available OctoMesh versions (latest 10):" -ForegroundColor Green
+            $display = $releases | Select-Object -First 10
+            for ($i = 0; $i -lt $display.Count; $i++) {
+                $marker = if ($i -eq 0) { " [default]" } else { "" }
+                Write-Host "  [$($i + 1)] $($display[$i].AppVersion)$marker"
             }
-        }
-        else
-        {
-            $key += $keyInfo.KeyChar
-            Write-Host -NoNewline "*"
+            $versionInput = Read-Host "Select version (press Enter for default: $($display[0].AppVersion))"
+            $selected = if ([string]::IsNullOrWhiteSpace($versionInput)) { $display[0] }
+                        else { $display[[int]$versionInput - 1] }
         }
     }
-    return $key
-}
+    $config.chartVersion = $selected.ChartVersion
+    $config.appVersion = $selected.AppVersion
+    Write-Host "Selected OctoMesh $($config.appVersion) (chart $($config.chartVersion))" -ForegroundColor Green
 
-function Initialize-EnvLocal([string]$envLocalPath, [string]$deploymentProfile, [bool]$includeSimulation)
-{
-    Write-Host ""
-    Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host "  OctoMesh Configuration Setup" -ForegroundColor Cyan
-    Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host ""
-
-    # Check if .env.local already exists
-    $existingConfig = @{}
-    if (Test-Path -Path $envLocalPath)
-    {
-        Write-Host "Found existing .env.local - loading current values..." -ForegroundColor Yellow
-        $lines = Get-Content $envLocalPath
-        foreach ($line in $lines)
-        {
-            if ($line -match '^([^#=]+)=(.*)$')
-            {
-                $existingConfig[$matches[1].Trim()] = $matches[2].Trim()
-            }
-        }
-    }
-
-    # 1. Select OctoMesh Version
-    Write-Host ""
-    Write-Host "Step 1: Select OctoMesh Version" -ForegroundColor Green
-    Write-Host "--------------------------------"
-
-    $versions = Get-OctoMeshVersions
-    if ($versions.Count -eq 0)
-    {
-        Write-Error "Could not fetch versions. Please check your internet connection."
-        return $false
-    }
-
-    $defaultVersion = $versions[0]
-    $currentVersion = if ($existingConfig.ContainsKey("OCTO_VERSION")) { $existingConfig["OCTO_VERSION"] } else { $null }
-
-    Write-Host "Available versions (showing latest 10):"
-    $displayVersions = $versions | Select-Object -First 10
-    for ($i = 0; $i -lt $displayVersions.Count; $i++)
-    {
-        $marker = ""
-        if ($displayVersions[$i] -eq $currentVersion) { $marker = " (current)" }
-        if ($i -eq 0) { $marker += " [default]" }
-        Write-Host "  [$($i + 1)] $($displayVersions[$i])$marker"
-    }
-    Write-Host "  [0] Enter custom version"
-    Write-Host ""
-
-    if ($currentVersion)
-    {
-        Write-Host "Current version: $currentVersion" -ForegroundColor Yellow
-    }
-
-    $versionInput = Read-Host "Select version (press Enter for default: $defaultVersion)"
-
-    if ([string]::IsNullOrWhiteSpace($versionInput))
-    {
-        $selectedVersion = $defaultVersion
-    }
-    elseif ($versionInput -eq "0")
-    {
-        $selectedVersion = Read-Host "Enter custom version (e.g., 3.2.218.0)"
-    }
-    else
-    {
-        $index = [int]$versionInput - 1
-        if ($index -ge 0 -and $index -lt $displayVersions.Count)
-        {
-            $selectedVersion = $displayVersions[$index]
-        }
-        else
-        {
-            Write-Host "Invalid selection, using default." -ForegroundColor Yellow
-            $selectedVersion = $defaultVersion
-        }
-    }
-
-    Write-Host "Selected version: $selectedVersion" -ForegroundColor Green
-
-    # 2. Identity Server License Key
-    Write-Host ""
-    Write-Host "Step 2: Identity Server License Key" -ForegroundColor Green
-    Write-Host "------------------------------------"
-    Write-Host "Get your license key at: https://duendesoftware.com/products/identityserver#pricing" -ForegroundColor Cyan
-    Write-Host "(Community edition is free for small companies and open source projects)"
-    Write-Host ""
-
-    $currentIdentityKey = if ($existingConfig.ContainsKey("IDENTITY_SERVER_LICENSE_KEY")) { $existingConfig["IDENTITY_SERVER_LICENSE_KEY"] } else { $null }
-
-    if ($currentIdentityKey)
-    {
-        $maskedKey = $currentIdentityKey.Substring(0, [Math]::Min(20, $currentIdentityKey.Length)) + "..."
-        Write-Host "Current key: $maskedKey" -ForegroundColor Yellow
-        $identityKeyInput = Read-LicenseKey "Enter new license key (press Enter to keep current): "
-        if ([string]::IsNullOrWhiteSpace($identityKeyInput))
-        {
-            $identityServerKey = $currentIdentityKey
-        }
-        else
-        {
-            $identityServerKey = $identityKeyInput.Trim()
-        }
-    }
-    else
-    {
-        $identityServerKey = Read-LicenseKey "Enter Identity Server license key: "
-        while ([string]::IsNullOrWhiteSpace($identityServerKey))
-        {
-            Write-Host "License key is required!" -ForegroundColor Red
-            $identityServerKey = Read-LicenseKey "Enter Identity Server license key: "
-        }
-    }
-
-    # 3. AutoMapper License Key
-    Write-Host ""
-    Write-Host "Step 3: AutoMapper License Key" -ForegroundColor Green
-    Write-Host "-------------------------------"
-    Write-Host "Get your license key at: https://www.automapper.org/pricing" -ForegroundColor Cyan
-    Write-Host "(Free tier available)"
-    Write-Host ""
-
-    $currentAutoMapperKey = if ($existingConfig.ContainsKey("AUTOMAPPER_LICENSE_KEY")) { $existingConfig["AUTOMAPPER_LICENSE_KEY"] } else { $null }
-
-    if ($currentAutoMapperKey)
-    {
-        $maskedKey = $currentAutoMapperKey.Substring(0, [Math]::Min(20, $currentAutoMapperKey.Length)) + "..."
-        Write-Host "Current key: $maskedKey" -ForegroundColor Yellow
-        $autoMapperKeyInput = Read-LicenseKey "Enter new license key (press Enter to keep current): "
-        if ([string]::IsNullOrWhiteSpace($autoMapperKeyInput))
-        {
-            $autoMapperKey = $currentAutoMapperKey
-        }
-        else
-        {
-            $autoMapperKey = $autoMapperKeyInput.Trim()
-        }
-    }
-    else
-    {
-        $autoMapperKey = Read-LicenseKey "Enter AutoMapper license key: "
-        while ([string]::IsNullOrWhiteSpace($autoMapperKey))
-        {
-            Write-Host "License key is required!" -ForegroundColor Red
-            $autoMapperKey = Read-LicenseKey "Enter AutoMapper license key: "
-        }
-    }
-
-    # 4. Reporting Services Version (only for full profile)
-    $selectedReportingVersion = ""
-    if ($deploymentProfile -eq "full")
-    {
+    # License keys
+    if ($IdentityServerLicenseKey) { $config.identityServerLicenseKey = $IdentityServerLicenseKey }
+    if (-not $config.identityServerLicenseKey) {
+        if ($NonInteractive) { throw "IdentityServerLicenseKey is required (parameter or local-config.json)." }
         Write-Host ""
-        Write-Host "Step 4: Select Reporting Services Version" -ForegroundColor Green
-        Write-Host "------------------------------------------"
-
-        $reportingVersions = Get-ReportingServicesVersions
-        if ($reportingVersions.Count -eq 0)
-        {
-            Write-Host "Could not fetch Reporting Services versions. Using manual input." -ForegroundColor Yellow
-            $selectedReportingVersion = Read-Host "Enter Reporting Services version (e.g., 1.0.0.0)"
-        }
-        else
-        {
-            $defaultReportingVersion = $reportingVersions[0]
-            $currentReportingVersion = if ($existingConfig.ContainsKey("OCTO_REPORTING_SERVICES_VERSION")) { $existingConfig["OCTO_REPORTING_SERVICES_VERSION"] } else { $null }
-
-            Write-Host "Available versions (showing latest 10):"
-            $displayReportingVersions = $reportingVersions | Select-Object -First 10
-            for ($i = 0; $i -lt $displayReportingVersions.Count; $i++)
-            {
-                $marker = ""
-                if ($displayReportingVersions[$i] -eq $currentReportingVersion) { $marker = " (current)" }
-                if ($i -eq 0) { $marker += " [default]" }
-                Write-Host "  [$($i + 1)] $($displayReportingVersions[$i])$marker"
-            }
-            Write-Host "  [0] Enter custom version"
-            Write-Host ""
-
-            if ($currentReportingVersion)
-            {
-                Write-Host "Current version: $currentReportingVersion" -ForegroundColor Yellow
-            }
-
-            $reportingVersionInput = Read-Host "Select version (press Enter for default: $defaultReportingVersion)"
-
-            if ([string]::IsNullOrWhiteSpace($reportingVersionInput))
-            {
-                $selectedReportingVersion = $defaultReportingVersion
-            }
-            elseif ($reportingVersionInput -eq "0")
-            {
-                $selectedReportingVersion = Read-Host "Enter custom version (e.g., 1.0.0.0)"
-            }
-            else
-            {
-                $index = [int]$reportingVersionInput - 1
-                if ($index -ge 0 -and $index -lt $displayReportingVersions.Count)
-                {
-                    $selectedReportingVersion = $displayReportingVersions[$index]
-                }
-                else
-                {
-                    Write-Host "Invalid selection, using default." -ForegroundColor Yellow
-                    $selectedReportingVersion = $defaultReportingVersion
-                }
-            }
-
-            Write-Host "Selected Reporting Services version: $selectedReportingVersion" -ForegroundColor Green
-        }
+        Write-Host "Duende IdentityServer license key" -ForegroundColor Green
+        Write-Host "Get one at https://duendesoftware.com/products/identityserver#pricing (community edition is free for small companies and open source)."
+        $config.identityServerLicenseKey = Read-MaskedInput "Enter Identity Server license key: "
     }
-
-    # Adapter Configuration
-    $stepNumber = if ($deploymentProfile -eq "full") { "5" } else { "4" }
-    Write-Host ""
-    Write-Host "Step $stepNumber`: Mesh Adapter Configuration" -ForegroundColor Green
-    Write-Host "------------------------------------"
-
-    $defaultTenantId = "meshtest"
-    $defaultAdapterRtId = "66004fda527ac79a03ecedd7"
-
-    $currentTenantId = if ($existingConfig.ContainsKey("ADAPTER_TENANT_ID")) { $existingConfig["ADAPTER_TENANT_ID"] } else { $defaultTenantId }
-    $currentAdapterRtId = if ($existingConfig.ContainsKey("ADAPTER_ADAPTERRT_ID")) { $existingConfig["ADAPTER_ADAPTERRT_ID"].Trim('"') } else { $defaultAdapterRtId }
-
-    Write-Host "Current Tenant ID: $currentTenantId" -ForegroundColor Yellow
-    $tenantIdInput = Read-Host "Enter Tenant ID (press Enter to keep: $currentTenantId)"
-    if ([string]::IsNullOrWhiteSpace($tenantIdInput))
-    {
-        $adapterTenantId = $currentTenantId
-    }
-    else
-    {
-        $adapterTenantId = $tenantIdInput.Trim()
-    }
-
-    Write-Host "Current Adapter RT ID: $currentAdapterRtId" -ForegroundColor Yellow
-    $adapterRtIdInput = Read-Host "Enter Adapter RT ID (press Enter to keep: $currentAdapterRtId)"
-    if ([string]::IsNullOrWhiteSpace($adapterRtIdInput))
-    {
-        $adapterRtId = $currentAdapterRtId
-    }
-    else
-    {
-        $adapterRtId = $adapterRtIdInput.Trim()
-    }
-
-    Write-Host "Tenant ID: $adapterTenantId" -ForegroundColor Green
-    Write-Host "Adapter RT ID: $adapterRtId" -ForegroundColor Green
-
-    # Simulation Adapter Configuration (optional)
-    $simulationAdapterTenantId = ""
-    $simulationAdapterRtId = ""
-
-    if ($includeSimulation)
-    {
-        $nextStepNumber = if ($deploymentProfile -eq "full") { "6" } else { "5" }
+    if ($AutoMapperLicenseKey) { $config.autoMapperLicenseKey = $AutoMapperLicenseKey }
+    if (-not $config.autoMapperLicenseKey) {
+        if ($NonInteractive) { throw "AutoMapperLicenseKey is required (parameter or local-config.json)." }
         Write-Host ""
-        Write-Host "Step $nextStepNumber`: Simulation Adapter Configuration" -ForegroundColor Green
-        Write-Host "------------------------------------"
-
-        $defaultSimTenantId = "meshtest"
-        $defaultSimAdapterRtId = "65d5c447b420da3fb12381bc"
-
-        $currentSimTenantId = if ($existingConfig.ContainsKey("SIMULATION_ADAPTER_TENANT_ID")) { $existingConfig["SIMULATION_ADAPTER_TENANT_ID"] } else { $defaultSimTenantId }
-        $currentSimAdapterRtId = if ($existingConfig.ContainsKey("SIMULATION_ADAPTER_RT_ID")) { $existingConfig["SIMULATION_ADAPTER_RT_ID"].Trim('"') } else { $defaultSimAdapterRtId }
-
-        Write-Host "Current Simulation Tenant ID: $currentSimTenantId" -ForegroundColor Yellow
-        $simTenantIdInput = Read-Host "Enter Simulation Adapter Tenant ID (press Enter to keep: $currentSimTenantId)"
-        if ([string]::IsNullOrWhiteSpace($simTenantIdInput))
-        {
-            $simulationAdapterTenantId = $currentSimTenantId
-        }
-        else
-        {
-            $simulationAdapterTenantId = $simTenantIdInput.Trim()
-        }
-
-        Write-Host "Current Simulation Adapter RT ID: $currentSimAdapterRtId" -ForegroundColor Yellow
-        $simAdapterRtIdInput = Read-Host "Enter Simulation Adapter RT ID (press Enter to keep: $currentSimAdapterRtId)"
-        if ([string]::IsNullOrWhiteSpace($simAdapterRtIdInput))
-        {
-            $simulationAdapterRtId = $currentSimAdapterRtId
-        }
-        else
-        {
-            $simulationAdapterRtId = $simAdapterRtIdInput.Trim()
-        }
-
-        Write-Host "Simulation Tenant ID: $simulationAdapterTenantId" -ForegroundColor Green
-        Write-Host "Simulation Adapter RT ID: $simulationAdapterRtId" -ForegroundColor Green
+        Write-Host "AutoMapper license key" -ForegroundColor Green
+        Write-Host "Get one at https://www.automapper.io/ (free tier available)."
+        $config.autoMapperLicenseKey = Read-MaskedInput "Enter AutoMapper license key: "
     }
 
-    # Write .env.local file
-    Write-Host ""
-    Write-Host "Writing configuration to .env.local..." -ForegroundColor Green
-
-    $envContent = @"
-# OctoMesh local configuration
-# Generated on $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-
-# OctoMesh Version
-OCTO_VERSION=$selectedVersion
-
-# License Keys
-IDENTITY_SERVER_LICENSE_KEY=$identityServerKey
-AUTOMAPPER_LICENSE_KEY=$autoMapperKey
-
-# Adapter Configuration
-ADAPTER_TENANT_ID=$adapterTenantId
-ADAPTER_ADAPTERRT_ID="$adapterRtId"
-"@
-
-    # Add Reporting Services version if full profile
-    if ($deploymentProfile -eq "full" -and -not [string]::IsNullOrWhiteSpace($selectedReportingVersion))
-    {
-        $envContent += "`n`n# Reporting Services Version`nOCTO_REPORTING_SERVICES_VERSION=$selectedReportingVersion"
-    }
-
-    # Add Simulation Adapter configuration if enabled
-    if ($includeSimulation -and -not [string]::IsNullOrWhiteSpace($simulationAdapterTenantId))
-    {
-        $envContent += "`n`n# Simulation Adapter Configuration`nSIMULATION_ADAPTER_TENANT_ID=$simulationAdapterTenantId`nSIMULATION_ADAPTER_RT_ID=`"$simulationAdapterRtId`""
-    }
-
-    Set-Content -Path $envLocalPath -Value $envContent -Encoding UTF8
-
-    Write-Host ""
-    Write-Host "Configuration saved successfully!" -ForegroundColor Green
-    Write-Host ""
-
-    return $true
+    New-Item -ItemType Directory -Path $GeneratedPath -Force | Out-Null
+    $config | ConvertTo-Json | Set-Content -Path $ConfigPath -Encoding UTF8
+    return $config
 }
 
-function Create-HttpsCert()
-{
-    # Install OpenSSL (e. g. winget install -e --id ShiningLight.OpenSSL.Dev)
-    if ((Get-Command openssl -ErrorAction SilentlyContinue).Length -eq 0)
-    {
-        Write-Error "Ensure that OpenSSL is installed and available in PATH environment variable."
-        return;
-    }
-    
-    # Replace these with the actual paths to your PFX and PEM files
-    $location = Get-Location
-    $keyFilePath = Join-Path $location "localhost_cert.key"
-    $csrFilePath = Join-Path $location "localhost_cert.csr"
-    $sourcePfxFilePath = Join-Path $location "localhost_cert.pfx"
-    $sourceCrtFilePath = Join-Path $location "localhost_cert.crt"
-    $destinationPemFilePath = Join-Path $location "localhost_cert.pem"
-    $certPassword = "Secret01"  # Replace "YourPFXPassword" with the password for the PFX file
-
-    Write-Host "Creating HTTPS certificate for localhost"
-    openssl genrsa -out $keyFilePath 2048
-    Write-Host 1
-    openssl req -new -key $keyFilePath -out $csrFilePath -config openssl.cnf 
-    # Create developer cert and trust it using PFX format
-    Write-Host 2
-    openssl x509 -req -days 365 -in $csrFilePath -signkey $keyFilePath -out $sourceCrtFilePath -extensions req_ext -extfile openssl.cnf
-    Write-Host 3
-    Get-Content $sourceCrtFilePath, $keyFilePath | Set-Content $destinationPemFilePath
-    # Erstelle eine PFX-Datei
-    Write-Host 4
-    openssl pkcs12 -export -out $sourcePfxFilePath -inkey  $keyFilePath -in $sourceCrtFilePath -passout pass:$certPassword
-  #  Write-Host 5
-    #dotnet dev-certs https -ep $sourcePfxFilePath -p $certPassword -t
-    # Create PEM format for trust self signed cert also in container itself
-    #openssl pkcs12 -in $sourcePfxFilePath -nokeys -out $destinationPemFilePath -nodes -passin pass:$certPassword  -passout pass:$certPassword
-}
-
-function Create-IdentityServerAuthorityCert()
-{
-    $certPassword = "Secret01"
-    openssl req -x509 -newkey rsa:2048 -sha256 -keyout IdentityServer4Auth.key -out IdentityServer4Auth.crt -subj "/CN=localhost" -days 10950 -passout pass:$certPassword
-    openssl pkcs12 -export -out IdentityServer4Auth.pfx -inkey IdentityServer4Auth.key -in IdentityServer4Auth.crt -passin pass:$certPassword -passout pass:$certPassword
-    openssl pkcs12 -export -out IdentityServer4Auth.pfx -inkey IdentityServer4Auth.key -in IdentityServer4Auth.crt -passin pass:$certPassword -passout pass:$certPassword
-}
-
-#$PSStyle.Progress.View = "Classic"
-
-# Check prerequisites before proceeding
-if (-not (Test-Prerequisites))
-{
-    return
-}
-
-$basedir = $PWD
-$infrastructurePath = Join-Path $basedir "octo-mesh"
-Push-Location $infrastructurePath
-
-# Check and initialize .env.local if needed
-$envLocalPath = Join-Path $infrastructurePath ".env.local"
-
-# Check if .env.local exists and has all required keys
-$needsConfig = $false
-if (-not (Test-Path -Path $envLocalPath))
-{
-    Write-Host "No .env.local found - configuration required." -ForegroundColor Yellow
-    $needsConfig = $true
-}
-else
-{
-    # Check if all required keys are present
-    $content = Get-Content $envLocalPath -Raw
-    if (-not ($content -match 'OCTO_VERSION=.+') -or
-        -not ($content -match 'IDENTITY_SERVER_LICENSE_KEY=.+') -or
-        -not ($content -match 'AUTOMAPPER_LICENSE_KEY=.+'))
-    {
-        Write-Host "Incomplete .env.local found - configuration required." -ForegroundColor Yellow
-        $needsConfig = $true
-    }
-}
-
-if ($needsConfig)
-{
-    $result = Initialize-EnvLocal -envLocalPath $envLocalPath -deploymentProfile $DeploymentProfile -includeSimulation $IncludeSimulation
-    if (-not $result)
-    {
-        Write-Error "Configuration failed. Please try again."
-        Pop-Location
+function New-KindCluster {
+    $existing = kind get clusters 2>$null
+    if ($existing -contains $ClusterName) {
+        Write-Host "kind cluster '$ClusterName' already exists - reusing it." -ForegroundColor Yellow
         return
     }
+    Write-Host "Creating kind cluster '$ClusterName'..." -ForegroundColor Cyan
+    kind create cluster --name $ClusterName --config (Join-Path $KubernetesPath "kind-cluster.yaml")
+    if ($LASTEXITCODE -ne 0) { throw "kind create cluster failed." }
 }
-else
-{
-    Write-Host "Configuration found in .env.local" -ForegroundColor Green
 
-    # Offer to reconfigure
-    $reconfigure = Read-Host "Do you want to reconfigure? (y/N)"
-    if ($reconfigure -eq "y" -or $reconfigure -eq "Y")
-    {
-        $result = Initialize-EnvLocal -envLocalPath $envLocalPath -deploymentProfile $DeploymentProfile -includeSimulation $IncludeSimulation
-        if (-not $result)
-        {
-            Write-Error "Configuration failed. Please try again."
-            Pop-Location
-            return
+function Install-Infrastructure {
+    Write-Host "Installing infrastructure (MongoDB, RabbitMQ, CrateDB)..." -ForegroundColor Cyan
+    kubectl --context $KubeContext apply -f (Join-Path $KubernetesPath "namespaces.yaml")
+
+    # MongoDB keyfile secret (generated once, reused on re-runs)
+    $keyFile = Join-Path $GeneratedPath "file.key"
+    if (-not (Test-Path $keyFile)) {
+        $randBytes = [byte[]]::new(741)
+        [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($randBytes)
+        [Convert]::ToBase64String($randBytes) | Set-Content -Path $keyFile -NoNewline -Encoding ascii
+    }
+    kubectl --context $KubeContext -n octo-infra create secret generic mongodb-keyfile `
+        --from-file=file.key=$keyFile --dry-run=client -o yaml | kubectl --context $KubeContext apply -f -
+    $mongoInitPath = Join-Path $KubernetesPath "infra/mongo-init"
+    kubectl --context $KubeContext -n octo-infra create configmap mongodb-init `
+        --from-file=$mongoInitPath --dry-run=client -o yaml | kubectl --context $KubeContext apply -f -
+
+    kubectl --context $KubeContext apply -f (Join-Path $KubernetesPath "infra/rabbitmq.yaml")
+    kubectl --context $KubeContext apply -f (Join-Path $KubernetesPath "infra/cratedb.yaml")
+    kubectl --context $KubeContext apply -f (Join-Path $KubernetesPath "infra/mongodb.yaml")
+
+    kubectl --context $KubeContext -n octo-infra rollout status statefulset/mongodb --timeout=300s
+    kubectl --context $KubeContext -n octo-infra rollout status deployment/rabbitmq --timeout=300s
+    kubectl --context $KubeContext -n octo-infra rollout status statefulset/cratedb --timeout=300s
+
+    # Initialize the replica set and the admin user (both scripts are idempotent).
+    Write-Host "Initializing MongoDB replica set..."
+    $attempts = 0
+    while ($true) {
+        $attempts++
+        $output = kubectl --context $KubeContext -n octo-infra exec mongodb-0 -- mongosh admin /scripts/init-replicaset.js 2>&1 | Out-String
+        if ($LASTEXITCODE -eq 0) { break }
+        if ($output -match "MongoNetworkError" -and $attempts -lt 20) {
+            Start-Sleep -Seconds 3
+            continue
         }
+        throw "MongoDB replica set initialization failed:`n$output"
+    }
+    kubectl --context $KubeContext -n octo-infra exec mongodb-0 -- mongosh admin /scripts/create-admin-user.js
+    if ($LASTEXITCODE -ne 0) { throw "MongoDB admin user creation failed." }
+}
+
+function Install-IngressAndCertManager {
+    Write-Host "Installing ingress-nginx and cert-manager..." -ForegroundColor Cyan
+    helm upgrade --install ingress-nginx ingress-nginx `
+        --repo https://kubernetes.github.io/ingress-nginx --version $IngressNginxVersion `
+        --namespace ingress-nginx --create-namespace `
+        --values (Join-Path $KubernetesPath "ingress-nginx-values.yaml") `
+        --kube-context $KubeContext --wait --timeout 5m
+    if ($LASTEXITCODE -ne 0) { throw "ingress-nginx install failed." }
+
+    helm upgrade --install cert-manager cert-manager `
+        --repo https://charts.jetstack.io --version $CertManagerVersion `
+        --namespace cert-manager --create-namespace `
+        --values (Join-Path $KubernetesPath "cert-manager-values.yaml") `
+        --kube-context $KubeContext --wait --timeout 5m
+    if ($LASTEXITCODE -ne 0) { throw "cert-manager install failed." }
+
+    kubectl --context $KubeContext apply -f (Join-Path $KubernetesPath "cluster-issuer.yaml")
+    kubectl --context $KubeContext wait --for=condition=Ready clusterissuer/mm-cloud-issuer --timeout=120s
+
+    # Export the root CA for OS trust and for chart rootCa values.
+    $caPath = Join-Path $GeneratedPath "local-root-ca.crt"
+    $caB64 = kubectl --context $KubeContext -n cert-manager get secret local-root-ca-tls -o jsonpath='{.data.ca\.crt}'
+    if (-not $caB64) { $caB64 = kubectl --context $KubeContext -n cert-manager get secret local-root-ca-tls -o jsonpath='{.data.tls\.crt}' }
+    [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($caB64)) | Set-Content -Path $caPath -NoNewline -Encoding ascii
+    Write-Host "Root CA exported to $caPath"
+}
+
+function Set-CoreDnsRewrite {
+    # Pods resolve *.127-0-0-1.nip.io to 127.0.0.1 (= the pod itself) via public DNS.
+    # Rewrite those names to the ingress controller so in-cluster OIDC/JWKS works.
+    # kubectl output with embedded newlines comes back from PowerShell as a string ARRAY
+    # (one element per line), not a single multi-line string. -join forces it back into a
+    # scalar string so -match/-replace/ConvertTo-Json below operate on the whole Corefile
+    # instead of per-line - otherwise ConvertTo-Json emits Corefile as a JSON array and the
+    # API server rejects the patch ("cannot unmarshal array into Go struct field ... string").
+    $corefile = (kubectl --context $KubeContext -n kube-system get configmap coredns -o jsonpath='{.data.Corefile}') -join "`n"
+    if ($corefile -match "127-0-0-1") {
+        Write-Host "CoreDNS rewrite already present." -ForegroundColor Yellow
+        return
+    }
+    Write-Host "Adding CoreDNS rewrite for *.$BaseDomain..." -ForegroundColor Cyan
+    $rewrite = "    rewrite name regex (.*)\.127-0-0-1\.nip\.io ingress-nginx-controller.ingress-nginx.svc.cluster.local answer auto"
+    $patchedCorefile = $corefile -replace "(?m)^(\s*ready\s*)$", "`$1`n$rewrite"
+    if ($patchedCorefile -eq $corefile) { throw "Could not locate the 'ready' line in the CoreDNS Corefile to insert the rewrite." }
+    $patch = @{ data = @{ Corefile = $patchedCorefile } } | ConvertTo-Json -Depth 5
+    $patchFile = Join-Path $GeneratedPath "coredns-patch.json"
+    $patch | Set-Content -Path $patchFile -Encoding UTF8
+    kubectl --context $KubeContext -n kube-system patch configmap coredns --type merge --patch-file $patchFile
+    if ($LASTEXITCODE -ne 0) { throw "CoreDNS Corefile patch failed." }
+    kubectl --context $KubeContext -n kube-system rollout restart deployment coredns
+    kubectl --context $KubeContext -n kube-system rollout status deployment coredns --timeout=120s
+    if ($LASTEXITCODE -ne 0) { throw "CoreDNS rollout after Corefile patch failed." }
+}
+
+function Add-CaTrust {
+    if ($SkipTrustCa) {
+        Write-Host "Skipping OS trust of the root CA (-SkipTrustCa). Browsers will warn about the certificate." -ForegroundColor Yellow
+        return
+    }
+    $caPath = Join-Path $GeneratedPath "local-root-ca.crt"
+    Write-Host "Trusting the local root CA in the OS store (may prompt for sudo/elevation)..." -ForegroundColor Cyan
+    if ($IsMacOS) {
+        sudo security delete-certificate -c $RootCaCommonName /Library/Keychains/System.keychain 2>$null
+        sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain $caPath
+    }
+    elseif ($IsWindows) {
+        Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -match [regex]::Escape($RootCaCommonName) } | Remove-Item -ErrorAction SilentlyContinue
+        Import-Certificate -FilePath $caPath -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+    }
+    else {
+        sudo cp $caPath /usr/local/share/ca-certificates/octomesh-getting-started-root-ca.crt
+        sudo update-ca-certificates
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "CA trust failed (non-fatal). You can trust $caPath manually or continue with browser warnings." -ForegroundColor Yellow
     }
 }
 
-# create backup directory (required for docker volume mount)
-if (!(Test-Path -Path "backup" -PathType Container))
-{
-    Write-Host "Creating backup directory"
-    New-Item -Path "backup" -ItemType Directory | Out-Null
-}
+# ── Main flow ────────────────────────────────────────────────────────────────
+if (-not (Test-Prerequisites)) { exit 1 }
+if (-not (Test-PortsFree)) { exit 1 }
+$config = Initialize-Configuration
+New-KindCluster
+Install-Infrastructure
+Install-IngressAndCertManager
+Set-CoreDnsRewrite
+Add-CaTrust
 
-# create the key file for mongodb
-Write-Progress -Activity 'Install Octo infrastructure' -Status 'Creating keys for mongodb cluster' -PercentComplete 1
-if (!(Test-Path -Path "file.key"))
-{
-    Write-Host "Creating key file and setting access";
-    $randBytes = New-Object byte[] 741
-    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($randBytes)
-    $randString = [Convert]::ToBase64String($randBytes)
-    $randString > file.key
-}
-else
-{
-    Write-Host "Already existing key for mongodb cluster"
-}
-
-Write-Progress -Activity 'Install OctoMesh' -Status 'Initializing cert for Authority' -PercentComplete 10
-if (!(Test-Path -Path "IdentityServer4Auth.pfx"))
-{
-    Create-IdentityServerAuthorityCert
-
-    if ($LastExitCode -ne 0)
-    {
-        return;
-    }
-}
-else
-{
-    Write-Host "Already existing cert for authenication Authority"    
-}
-
-Write-Progress -Activity 'Install OctoMesh' -Status 'Initializing HTTPS self signed cert' -PercentComplete 20
-if (!(Test-Path -Path "localhost_cert.pfx") -or !(Test-Path -Path "localhost_cert.pem"))
-{
-    Create-HttpsCert
-
-    if ($LastExitCode -ne 0)
-    {
-        return;
-    }
-}
-else
-{
-    Write-Host "Already existing cert for HTTPS certificate for localhost"
-
-}
-
-Write-Progress -Activity 'Install Octo infrastructure' -Status 'Docker compose up' -PercentComplete 30
-
-# run ...
-$profileInfo = $DeploymentProfile
-if ($IncludeSimulation) { $profileInfo += " + simulation" }
-Write-Host "Starting with profile: $profileInfo" -ForegroundColor Cyan
-
-$composeArgs = @("compose", "--env-file", ".env", "--env-file", ".env.local")
-if ($DeploymentProfile -eq "full")
-{
-    $composeArgs += @("--profile", "full")
-}
-if ($IncludeSimulation)
-{
-    $composeArgs += @("--profile", "simulation")
-}
-$composeArgs += @("up", "-d")
-& docker @composeArgs
-
-Write-Progress -Activity 'Install OctoMesh' -Status  "Waiting for the containers to be started..." -PercentComplete 40
-Wait-DockerContainer octo-mongo-0.mongo
-Start-Sleep -s 3
-
-Write-Progress -Activity 'Install OctoMesh' -Status 'Setting up mongodb replicaset' -PercentComplete 60
-
-Write-Host "Initializing replica set and waiting for complete initialization";
-while ($true)
-{
-    &{
-        docker exec octo-mongo-0.mongo sh -c "mongosh admin /scripts/init-database.js"
-    } 2> stderr.txt
-    $err = get-content stderr.txt
-    Write-Host $err
-    if ((-not([string]::IsNullOrWhiteSpace($err))) -And $err.Contains("MongoNetworkError"))
-    {
-        Write-Progress -Activity 'Install OctoMesh' -Status  "Retrying to init replica set..." -PercentComplete 70
-        Start-Sleep -s 3
-        continue;
-    }
-    Remove-Item stderr.txt
-    break;
-}
-
-
-# init user.
-Write-Progress -Activity 'Install OctoMesh' -Status 'Creating admin user' -PercentComplete 80
-docker exec octo-mongo-0.mongo sh -c "mongosh admin /scripts/create-admin-user.js"
-
-Write-Progress -Activity 'Install Octo infrastructure' -Status 'Complete' -PercentComplete 100
-
-#Clear-Host
-Write-Host ""
-Write-Host "========================================" -ForegroundColor Green
-Write-Host "  Installation Complete!" -ForegroundColor Green
-Write-Host "========================================" -ForegroundColor Green
-Write-Host ""
-Write-Host "Next steps:" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "1. Install the SSL certificate" -ForegroundColor Yellow
-Write-Host "   The certificate was created in: octo-mesh/localhost_cert.pfx"
-Write-Host "   - Windows: Double-click the .pfx file and import to 'Trusted Root Certification Authorities'"
-Write-Host "   - macOS: Double-click the .pfx file and add to Keychain, then trust it"
-Write-Host "   Password: Secret01"
-Write-Host ""
-Write-Host "2. Create the admin user" -ForegroundColor Yellow
-Write-Host "   Open https://octo-identity-services:5003/ in your browser"
-Write-Host "   and register the admin user with an email and password."
-
-if ($DeploymentProfile -eq "full")
-{
-    Write-Host ""
-    Write-Host "3. Log in to OctoMesh CLI" -ForegroundColor Yellow
-    Write-Host "   Run ./om-login-local.ps1 to log in with the admin user."
-    Write-Host ""
-    Write-Host "4. Setup Identity Service clients" -ForegroundColor Yellow
-    Write-Host "   Run ./om-setupIdentityService-local.ps1 to create the client"
-    Write-Host "   definitions for Data Refinery Studio."
-}
-
-Write-Host ""
-Write-Host "Commands:"
-Write-Host "  Stop:  ./om-stop.ps1"
-Write-Host "  Start: ./om-start.ps1"
-
-
-Pop-Location
-
+# ---- platform phase (Task 6) ----
