@@ -1,37 +1,18 @@
-param(
-    [Parameter()]
-    [ValidateSet("core", "full")]
-    [string]$DeploymentProfile = "core",
-    [Parameter()]
-    [switch]$IncludeSimulation = $false
-)
+#!/usr/bin/env pwsh
+# Stops the OctoMesh kind cluster. Data is preserved; restart with ./om-start.ps1.
+$ErrorActionPreference = "Stop"
 
-$basedir = $PWD
-$infrastructurePath = Join-Path $basedir "octo-mesh"
-
-if (!(Test-Path $infrastructurePath)) {
-    Write-Error "Infrastructure path $infrastructurePath does not exist"
-    return;
+$node = "octomesh-control-plane"
+$state = docker inspect -f '{{.State.Status}}' $node 2>$null
+if (-not $state) {
+    Write-Host "No OctoMesh kind cluster found (container '$node' does not exist)." -ForegroundColor Yellow
+    exit 0
 }
-
-Push-Location $infrastructurePath
-
-$profileInfo = $DeploymentProfile
-if ($IncludeSimulation) { $profileInfo += " + simulation" }
-Write-Host "Stopping Octo infrastructure with profile: $profileInfo" -ForegroundColor Cyan
-
-$composeArgs = @("compose", "--env-file", ".env", "--env-file", ".env.local")
-if ($DeploymentProfile -eq "full")
-{
-    $composeArgs += @("--profile", "full")
+if ($state -ne "running") {
+    Write-Host "OctoMesh cluster is already stopped." -ForegroundColor Yellow
+    exit 0
 }
-if ($IncludeSimulation)
-{
-    $composeArgs += @("--profile", "simulation")
-}
-$composeArgs += @("down")
-& docker @composeArgs
-
-Pop-Location
-
-Write-Host "Containers stopped."
+Write-Host "Stopping the OctoMesh kind cluster..." -ForegroundColor Cyan
+docker stop $node | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "docker stop $node failed." }
+Write-Host "Stopped. Data is preserved - start again with ./om-start.ps1."

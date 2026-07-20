@@ -1,38 +1,26 @@
-param(
-    [Parameter()]
-    [ValidateSet("core", "full")]
-    [string]$DeploymentProfile = "core",
-    [Parameter()]
-    [switch]$IncludeSimulation = $false
-)
+#!/usr/bin/env pwsh
+# Starts a previously stopped OctoMesh kind cluster.
+$ErrorActionPreference = "Stop"
 
-$basedir = $PWD
-$infrastructurePath = Join-Path $basedir "octo-mesh"
-
-if (!(Test-Path $infrastructurePath)) {
-    Write-Error "Infrastructure path $infrastructurePath does not exist"
-    return;
+$node = "octomesh-control-plane"
+$state = docker inspect -f '{{.State.Status}}' $node 2>$null
+if (-not $state) {
+    Write-Host "No OctoMesh kind cluster found. Run ./om-install.ps1 first." -ForegroundColor Red
+    exit 1
 }
-
-Push-Location $infrastructurePath
-
-$profileInfo = $DeploymentProfile
-if ($IncludeSimulation) { $profileInfo += " + simulation" }
-Write-Host "Starting Octo infrastructure with profile: $profileInfo" -ForegroundColor Cyan
-
-$composeArgs = @("compose", "--env-file", ".env", "--env-file", ".env.local")
-if ($DeploymentProfile -eq "full")
-{
-    $composeArgs += @("--profile", "full")
+if ($state -eq "running") {
+    Write-Host "OctoMesh cluster is already running." -ForegroundColor Yellow
 }
-if ($IncludeSimulation)
-{
-    $composeArgs += @("--profile", "simulation")
+else {
+    Write-Host "Starting the OctoMesh kind cluster..." -ForegroundColor Cyan
+    docker start $node | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "docker start $node failed." }
 }
-$composeArgs += @("up", "-d")
-& docker @composeArgs
-
-Pop-Location
-
-Write-Host "Start done. Containers are running."
-Write-Host "For stopping use './om-stop.ps1'"
+Write-Host "Waiting for pods to become ready (this can take a few minutes after a cold start)..."
+$deadline = (Get-Date).AddMinutes(10)
+while ((Get-Date) -lt $deadline) {
+    $notReady = kubectl --context kind-octomesh -n octo get pods --no-headers 2>$null | Where-Object { $_ -notmatch "Running|Completed" }
+    if ($LASTEXITCODE -eq 0 -and -not $notReady) { break }
+    Start-Sleep -Seconds 10
+}
+Write-Host "Start done. Check details with ./om-status.ps1."
