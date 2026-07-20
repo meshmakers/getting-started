@@ -1,167 +1,109 @@
 # Getting started with OctoMesh
 
-This readme provides an overview of the OctoMesh platform and how to get started with the OctoMesh CLI.
+This repository deploys the OctoMesh platform on your machine using the official
+OctoMesh Helm charts inside a local [kind](https://kind.sigs.k8s.io/) (Kubernetes
+in Docker) cluster — the same deployment model OctoMesh uses in real clusters.
 
-## Scripts Overview
+## Prerequisites
 
-The `scripts/` folder contains PowerShell scripts to manage the OctoMesh platform:
+* [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine on Linux)
+  * **Note:** the OctoMesh service images are currently amd64-only, so an amd64 host
+    (Windows, Linux, or Intel Mac) is required. Apple Silicon support arrives as soon
+    as the multi-arch images are published.
+* [PowerShell 7.4+](https://learn.microsoft.com/powershell/scripting/install/installing-powershell)
+* [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation) v0.31+ (`brew install kind` / `winget install Kubernetes.kind`)
+* [kubectl](https://kubernetes.io/docs/tasks/tools/)
+* [helm](https://helm.sh/docs/intro/install/) v3
+* openssl in PATH (`brew install openssl` / `winget install ShiningLight.OpenSSL.Dev`)
+* octo-cli (`choco install octo-cli` on Windows; download the self-contained binary for
+  macOS/Linux from the OctoMesh release page) — **minimum version: the first release
+  that includes the `DeployPool` command**
+* License keys (both prompted during installation):
+  * [Duende IdentityServer](https://duendesoftware.com/products/identityserver#pricing) — community edition is free for small companies and open source
+  * [AutoMapper](https://www.automapper.io/) — free tier available
 
-| Script                            | Description                                                                                                                                                                                 |
-|-----------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `om-install.ps1`                  | Installs and configures the OctoMesh platform. Prompts for version selection and license keys, creates SSL certificates, starts Docker containers, and initializes the MongoDB replica set. |
-| `om-start.ps1`                    | Starts the OctoMesh Docker containers after they have been stopped.                                                                                                                         |
-| `om-stop.ps1`                     | Stops all running OctoMesh Docker containers without removing data.                                                                                                                         |
-| `om-uninstall.ps1`                | Completely removes the OctoMesh platform including all Docker containers and volumes.                                                                                                       |
-| `om-login-local.ps1`              | Configures the octo-cli for the local environment and initiates an interactive login. Supports `-tenantId` and `-includeReporting` parameters.                                             |
-| `om-setupIdentityService-local.ps1` | Creates Identity Service client definitions for Data Refinery Studio. Required when using the `full` profile.                                                                             |
+No hosts-file entry and no manual certificate import are needed: services are
+reached at `*.127-0-0-1.nip.io` hostnames (public DNS that resolves to 127.0.0.1)
+and the installer sets up a locally-trusted certificate authority.
 
-### Profiles
-
-The scripts `om-install.ps1`, `om-start.ps1`, and `om-stop.ps1` support a `-DeploymentProfile` parameter:
-
-| Profile | Description                                                    |
-|---------|----------------------------------------------------------------|
-| `core`  | Default. Starts all services except Data Refinery Studio.      |
-| `full`  | Starts all services including Data Refinery Studio.            |
-
-### Simulation Adapter
-
-The scripts also support an optional `-IncludeSimulation` switch to start the Simulation Adapter:
-
-```pwsh
-# Install with core profile (default)
-./om-install.ps1
-
-# Install with full profile (includes Data Refinery Studio)
-./om-install.ps1 -DeploymentProfile full
-
-# Install with simulation adapter
-./om-install.ps1 -IncludeSimulation
-
-# Install with full profile and simulation adapter
-./om-install.ps1 -DeploymentProfile full -IncludeSimulation
-
-# Start/Stop with specific profile
-./om-start.ps1 -DeploymentProfile full
-./om-stop.ps1 -DeploymentProfile full
-
-# Start/Stop with simulation adapter
-./om-start.ps1 -IncludeSimulation
-./om-stop.ps1 -IncludeSimulation
-```
-
-When using `-IncludeSimulation`, the install script will prompt for the Simulation Adapter Tenant ID and Adapter RT ID.
-
-## Clone the repository
-
-Clone the repository to your local machine using:
-
-```bash
-# using http
-https://github.com/meshmakers/getting-started.git
-# using ssh
-git@github.com:meshmakers/getting-started.git
-```
-
-## Prepare your environment
-
-Before you begin, ensure you have the following installed:
-* Docker Desktop (4.29+)
-* Powershell (7.1+)
-* openssl
-
-Edit /etc/hosts or C:\Windows\System32\drivers\etc\hosts file and add the following entry:
-
-```bash
-# OctoMesh Identity Services
-127.0.0.1 octo-identity-services
-# end OctoMesh Identity Services
-```
-
-IMPORTANT: Ensure that openssl is available in your PATH: 
-```bash
-openssl
-```
-
-## Install octo-cli
-octo-cli is a command-line interface (CLI) tool that allows you to interact with the OctoMesh platform from your terminal. It provides a set of commands that you can use to create, manage, and deploy your OctoMesh applications.
+## Install
 
 ```pwsh
-# Install the OctoMesh CLI
-choco install octo-cli
-```
-
-Ensure that octo-cli installed successfully by running the following command:
-
-```pwsh
-octo-cli
-```
-
-## Start the OctoMesh platform
-
-Navigate to the root directory of the cloned repository and run the following command:
-
-```pswsh
 cd scripts
-./om-install.ps1
+./om-install.ps1                          # core profile
+./om-install.ps1 -DeploymentProfile full  # + Refinery Studio and Reporting
 ```
-This command will start the OctoMesh platform with mongodb and crate databases, and the OctoMesh services.
 
-## Install the certificate 
+The installer:
+1. creates a kind cluster named `octomesh` (all ports bound to 127.0.0.1 only),
+2. installs MongoDB, RabbitMQ, and CrateDB,
+3. installs ingress-nginx and cert-manager with a local root CA (you will be asked
+   for sudo/admin rights to trust it; skip with `-SkipTrustCa`),
+4. installs the OctoMesh platform and the Communication Operator from the public
+   Helm chart repository (release versions only — you pick the version, latest is
+   the default).
 
-In the infrastructure folder, the install script created certificates. To allow the tools to connect to the platform, install the certificate into the local certificate store.
+## Create the admin user and log in
 
-## Log-In to OctoMesh
-
-Navigate to https://octo-identity-services:5003/ in your browser to view the OctoMesh platform.
-
-Use an email and password to register the admin user. Please note that the email must be a valid email address, but it does not have to be a real email address.
-
-## Log-In to OctoMesh CLI
-Run the following command to log in to the OctoMesh CLI:
+1. Open <https://identity.127-0-0-1.nip.io/> and register the admin user
+   (the email address must be well-formed but does not need to exist).
+2. Configure and log in the CLI:
 
 ```pwsh
-# Default login (tenant: meshtest, no reporting)
-./om-login-local.ps1
-
-# Custom tenant ID
-./om-login-local.ps1 -tenantId "mytenant"
-
-# Include Reporting Services (for full profile)
-./om-login-local.ps1 -includeReporting $true
-
-# Both parameters
-./om-login-local.ps1 -tenantId "mytenant" -includeReporting $true
+./om-login-local.ps1                          # tenant: meshtest
+./om-login-local.ps1 -tenantId "mytenant"     # custom tenant
+./om-login-local.ps1 -includeReporting $true  # full profile
 ```
 
-| Parameter           | Default     | Description                                           |
-|---------------------|-------------|-------------------------------------------------------|
-| `-tenantId`         | `meshtest`  | The tenant ID to configure for the CLI.               |
-| `-includeReporting` | `$false`    | Set to `$true` to include Reporting Services URL.     |
-
-## Setup Identity Service (full profile only)
-
-If you installed with `-DeploymentProfile full`, run the following command after logging in to setup the client definitions for Data Refinery Studio:
+## Create a tenant and deploy the mesh adapter
 
 ```pwsh
-./om-setupIdentityService-local.ps1
+./om-bootstrap-tenant.ps1                       # tenant meshtest + mesh adapter
+./om-bootstrap-tenant.ps1 -IncludeSimulation    # + simulation adapter
 ```
 
-## URIS
-- OctoMesh Identity Services: https://octo-identity-services:5003/
-- OctoMesh Repository Playground for system tenant: https://localhost:5001/tenants/octosystem/graphql/playground
-- OctoMesh Data Refinery Studio: https://localhost:5011/
-- OctoMesh Bot Dashboard: https://localhost:5009/ui/jobs
-- OctoMesh Platform Services (configuration discovery): https://localhost:5025/octosystem/_configuration
-- OctoMesh Simulation Adapter: https://localhost:5023/ (when using `-IncludeSimulation`)
+This creates the tenant, enables communication (which seeds the default pool, the
+mesh adapter, and the public chart repository), and deploys the adapters through
+the Communication Operator — exactly the way managed OctoMesh environments work.
 
-# Further Reading
-- [OctoMesh Documentation](https://docs.meshmakers.cloud)
+## URLs
 
-## Uninstall
-To uninstall the OctoMesh platform, run the following command:
+| Service | URL |
+|---|---|
+| Identity | https://identity.127-0-0-1.nip.io/ |
+| GraphQL playground (system tenant) | https://assets.127-0-0-1.nip.io/tenants/octosystem/graphql/playground |
+| Bot dashboard | https://bots.127-0-0-1.nip.io/ui/jobs |
+| Platform services (configuration discovery) | https://platform.127-0-0-1.nip.io/octosystem/_configuration |
+| Refinery Studio (full profile) | https://studio.127-0-0-1.nip.io/ |
+| Reporting (full profile) | https://reporting.127-0-0-1.nip.io/ |
+| RabbitMQ management | http://localhost:15672/ (guest/guest) |
+| CrateDB console | http://localhost:4301/ |
+| MongoDB | mongodb://localhost:27017 |
+
+## Manage the installation
 
 ```pwsh
-./om-uninstall.ps1
+./om-status.ps1      # pods, helm releases, ports, URLs
+./om-stop.ps1        # stop the cluster (data preserved)
+./om-start.ps1       # start it again
+./om-uninstall.ps1   # delete the cluster AND ALL DATA, untrust the CA
 ```
+
+## Troubleshooting
+
+* **`*.127-0-0-1.nip.io` does not resolve** — some routers/corporate DNS servers
+  block DNS answers that point to 127.0.0.1 (rebind protection). Fallback: add
+  `127.0.0.1 identity.127-0-0-1.nip.io assets.127-0-0-1.nip.io bots.127-0-0-1.nip.io communication.127-0-0-1.nip.io platform.127-0-0-1.nip.io studio.127-0-0-1.nip.io reporting.127-0-0-1.nip.io`
+  to your hosts file.
+* **Docker Hub rate limits during install** — anonymous pulls are limited; run
+  `docker login` with a free Docker account before installing.
+* **Ports already in use** — the installer refuses when 80/443/27017/5672/15672/5432/4301
+  are taken (e.g. by another local database). Stop the conflicting service first.
+* **Browser warns about the certificate** — the root CA trust step was skipped or
+  failed. Re-run `./om-install.ps1` without `-SkipTrustCa`, or trust
+  `scripts/kubernetes/.generated/local-root-ca.crt` manually.
+
+# Further reading
+
+* [OctoMesh documentation](https://docs.meshmakers.cloud)
 
