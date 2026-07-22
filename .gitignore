@@ -4,11 +4,6 @@
 ## Get latest from https://github.com/github/gitignore/blob/main/VisualStudio.gitignore
 .DS_Store
 .idea/
-scripts/octo-mesh/*.crt
-scripts/octo-mesh/*.key
-scripts/octo-mesh/*.csr
-scripts/octo-mesh/*.pem
-scripts/octo-mesh/.env.local
 
 # User-specific files
 *.rsuser
@@ -405,7 +400,13 @@ FodyWeavers.xsd
 *.sln.iml
 
 .DS_Store
-/scripts/infrastructure/*.crt
-/scripts/infrastructure/*.csr
-/scripts/infrastructure/*.key
-/scripts/infrastructure/*.pem
+
+# Leftover local files from the retired Docker Compose deployment (certs, keys,
+# .env.local with license keys) — never track anything under this directory.
+scripts/octo-mesh/
+# Local agent-workflow scratch (task briefs, reports, review diffs) — never track.
+.superpowers/
+
+# kind/helm deployment — generated local artifacts (certs, keys, CA, config)
+scripts/kubernetes/.generated/
+scripts/kubernetes/local-config.json

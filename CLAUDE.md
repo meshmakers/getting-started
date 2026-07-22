@@ -4,102 +4,67 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This repository provides setup scripts and Docker Compose configurations for deploying the OctoMesh platform locally. OctoMesh is a platform with identity services, asset repository services, bot services, and various other microservices.
+This repository provides PowerShell scripts that deploy the OctoMesh platform into a
+local kind (Kubernetes in Docker) cluster using the official OctoMesh Helm charts from
+the public release repository (https://meshmakers.github.io/charts). Release versions
+only — rolling/dev tags are not publicly available.
 
 ## Common Commands
 
-All commands must be run from the `scripts/` directory using PowerShell 7.1+.
+All commands run from `scripts/` with PowerShell 7.4+.
 
-### Installation and Startup
 ```pwsh
-# Install OctoMesh (core profile - default)
-./om-install.ps1
-
-# Install with full profile (includes Data Refinery Studio and Reporting Services)
-./om-install.ps1 -DeploymentProfile full
-
-# Install with simulation adapter
-./om-install.ps1 -IncludeSimulation
-
-# Install with full profile and simulation adapter
-./om-install.ps1 -DeploymentProfile full -IncludeSimulation
-
-# Start containers after stopping
-./om-start.ps1
-./om-start.ps1 -DeploymentProfile full
-./om-start.ps1 -IncludeSimulation
-
-# Stop containers
-./om-stop.ps1
-./om-stop.ps1 -DeploymentProfile full
-./om-stop.ps1 -IncludeSimulation
-
-# Uninstall (removes containers and volumes)
-./om-uninstall.ps1
-```
-
-### Authentication
-```pwsh
-# Login to CLI (default tenant: meshtest)
-./om-login-local.ps1
-
-# Login with custom tenant
-./om-login-local.ps1 -tenantId "mytenant"
-
-# Login with reporting services enabled
-./om-login-local.ps1 -includeReporting $true
-```
-
-### Setup Identity Service (full profile only)
-```pwsh
-./om-setupIdentityService-local.ps1
+./om-install.ps1 [-DeploymentProfile core|full] [-SkipTrustCa] [-NonInteractive]
+                 [-ChartVersion X.Y.Z] [-IdentityServerLicenseKey …] [-AutoMapperLicenseKey …]
+./om-login-local.ps1 [-tenantId meshtest] [-includeReporting $true]
+./om-bootstrap-tenant.ps1 [-TenantId meshtest] [-IncludeSimulation]
+./om-status.ps1
+./om-stop.ps1 / ./om-start.ps1          # stop/start the kind node container (data preserved);
+                                        # om-start waits for Identity's JWKS after a cold start and
+                                        # restarts the token-validating services once (AB#4498 workaround)
+./om-uninstall.ps1 [-Force] [-KeepCaTrust] [-KeepGeneratedFiles]   # deletes cluster + data
 ```
 
 ## Architecture
 
-### Docker Infrastructure
+* kind cluster `octomesh` (kubectl context `kind-octomesh`), host ports on 127.0.0.1:
+  80/443 (ingress), 27017 (Mongo), 5672/15672 (RabbitMQ), 5432/4301 (CrateDB).
+* Namespaces: `octo-infra` (Mongo 1-member replica set `rs` + keyfile, RabbitMQ,
+  CrateDB single node), `octo` (platform services + operator-deployed adapters),
+  `octo-operator-system` (CRDs + Communication Operator), plus ingress-nginx and
+  cert-manager.
+* TLS: cert-manager self-signed root CA (CN "OctoMesh Getting Started Root CA")
+  behind ClusterIssuer `mm-cloud-issuer` (same name as managed environments).
+* Hostnames: `https://{identity,assets,bots,communication,platform,studio,reporting}.127-0-0-1.nip.io`.
+  A CoreDNS rewrite resolves `*.127-0-0-1.nip.io` to ingress-nginx inside the cluster
+  (pods fetch JWKS from the public identity URI — without the rewrite they would
+  resolve 127.0.0.1 = themselves).
+* Charts installed: `octo-mesh-crds` and `octo-mesh-communication-operator`
+  (`autoManagePools=true`) in `octo-operator-system`; `octo-mesh` (and
+  `octo-mesh-reporting` on the full profile) in `octo`. `octo-mesh-crds` and
+  `octo-mesh-communication-operator` ride the same chart version as `octo-mesh`
+  (selected at install time from the public index). The mesh adapter, simulation,
+  and reporting charts release independently, so each is resolved separately to
+  the newest version at or below the selected platform version.
+* `serviceDefaults.environment=production` makes `EnableCommunication` apply the
+  Release blueprint variant, which seeds: Pool `670000000000000000000001`,
+  MeshAdapter `670000000000000000000002` (chart `octo-mesh-adapter`), and
+  HelmRepositoryConfiguration `670000000000000000000004` → https://meshmakers.github.io/charts.
+  `om-bootstrap-tenant.ps1` then pins the chart version, deploys the pool
+  (`octo-cli -c DeployPool`), and deploys the adapter (`octo-cli -c DeployWorkload`).
+  The Studio OIDC client is blueprint-seeded from `services.studio.publicUri` —
+  there is no manual client-registration script anymore.
+* Generated local state (gitignored): `scripts/kubernetes/.generated/` (signing key
+  PFX, root CA, Mongo keyfile, operator webhook certs), `scripts/kubernetes/local-config.json`
+  (chart version + license keys).
 
-The platform runs as Docker containers orchestrated by `scripts/octo-mesh/docker-compose.yml`:
+## Key constraints
 
-- **Databases**:
-  - MongoDB 8.0 replica set (3 nodes: ports 27017-27019)
-  - CrateDB 5.10 cluster (3 nodes: admin ports 4301-4303, PostgreSQL ports 5432-5434)
-- **Message Broker**: RabbitMQ 4.0 (ports 5672, 15672)
-- **OctoMesh Services** (all meshmakers Docker images):
-  - Identity Services (port 5003)
-  - Asset Repository Services (port 5001)
-  - Bot Services (port 5009)
-  - Communication Controller Services (port 5015)
-  - Platform Services (port 5025)
-  - Mesh Adapter (port 5021)
-  - Reporting Services (port 5007) - full profile only
-  - Data Refinery Studio (port 5011) - full profile only
-  - Simulation Adapter (port 5023) - `-IncludeSimulation` switch only
-
-### Deployment Profiles
-
-- `core` (default): All services except Data Refinery Studio and Reporting Services
-- `full`: All services including Data Refinery Studio and Reporting Services
-- `-IncludeSimulation` switch: Adds Simulation Adapter to any profile
-
-### Environment Configuration
-
-- `scripts/octo-mesh/.env` - Version configuration (tracked)
-- `scripts/octo-mesh/.env.local` - Local secrets and passwords (not tracked, see `.env.local.example`)
-
-## Prerequisites
-
-- Docker Desktop 4.29+
-- PowerShell 7.1+
-- openssl (in PATH)
-- octo-cli (`choco install octo-cli`)
-- Host entry: `127.0.0.1 octo-identity-services` in /etc/hosts
-
-## Key URLs (after installation)
-
-- Identity Services: https://octo-identity-services:5003/
-- GraphQL Playground: https://localhost:5001/tenants/octosystem/graphql/playground
-- Bot Dashboard: https://localhost:5009/ui/jobs
-- Platform Services (configuration discovery): https://localhost:5025/octosystem/_configuration
-- Data Refinery Studio: https://localhost:5011/ (full profile)
-- Simulation Adapter: https://localhost:5023/ (`-IncludeSimulation`)
+* Everything must work for EXTERNAL users: public charts, public Docker Hub images,
+  release versions only. Never reference docker.mm.cloud or main-latest tags.
+* Scripts are standalone — no octo-tools checkout, no monorepo assumptions.
+* Service images are multi-arch (amd64/arm64) as of release 3.4.51; releases older
+  than 3.4.51 are amd64-only. octo-cli minimum version is 3.4.51.
+* Dev-grade default credentials are intentional (quickstart), but nothing generated
+  or secret may be committed.
+* All artifacts in English. Commit format: `AB#<n> <New/Fix>: <description>`.

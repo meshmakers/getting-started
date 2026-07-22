@@ -1,0 +1,45 @@
+# Static values for the published octo-mesh chart (https://meshmakers.github.io/charts).
+# Dynamic values (license keys, passwords, signing key, root CA, studio deploy flag)
+# are passed by om-install.ps1 at install time.
+
+serviceDefaults:
+  # "production" selects the Release variant of the service-managed blueprints:
+  # EnableCommunication then seeds the pool, the mesh adapter, and the
+  # HelmRepositoryConfiguration pointing at the PUBLIC release chart repo.
+  environment: "production"
+
+clusterDependencies:
+  mongodbHost: "mongodb-0.mongodb.octo-infra.svc.cluster.local:27017"
+  mongodbReplicaSet: "rs"
+  rabbitMqHost: "rabbitmq.octo-infra.svc.cluster.local"
+  rabbitMqUser: "guest"
+  streamDataHost: "cratedb.octo-infra.svc.cluster.local"
+  streamDataUser: "crate"
+  streamDataEnabled: true
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: mm-cloud-issuer
+
+services:
+  identity:
+    publicUri: "https://identity.127-0-0-1.nip.io"
+  assetRepository:
+    publicUri: "https://assets.127-0-0-1.nip.io"
+  bot:
+    publicUri: "https://bots.127-0-0-1.nip.io"
+  communication:
+    publicUri: "https://communication.127-0-0-1.nip.io"
+    domains:
+      # Resolves the {{domain.default}} template in blueprint-seeded workload
+      # hostnames (mesh adapter -> adapter.127-0-0-1.nip.io).
+      default: "127-0-0-1.nip.io"
+  platformServices:
+    publicUri: "https://platform.127-0-0-1.nip.io"
+  studio:
+    # deploy flag is set by om-install.ps1 (-DeploymentProfile full).
+    # publicUri is always set: the identity blueprint seeds the Studio OIDC
+    # client from it, so the client is correct the moment studio is deployed.
+    publicUri: "https://studio.127-0-0-1.nip.io"

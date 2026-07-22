@@ -1,0 +1,37 @@
+# ingress-nginx for the local kind cluster. NodePort 30080/30443 are mapped to
+# host 80/443 by kubernetes/kind-cluster.yaml. Mirrors staging (chart 4.15.1,
+# class "nginx") with NodePort instead of LoadBalancer.
+controller:
+  ingressClassResource:
+    name: nginx
+    enabled: true
+    default: true
+  ingressClass: nginx
+  watchIngressWithoutClass: true
+  replicaCount: 1
+  # The octo-mesh chart's default ingress.annotations includes a
+  # configuration-snippet (CORS headers on every response, incl. error pages,
+  # via more_set_headers). ingress-nginx 4.9+ rejects *-snippet annotations via
+  # its admission webhook unless explicitly allowed - without this the
+  # octo-mesh ingress install fails with "configuration-snippet annotation
+  # cannot be used".
+  allowSnippetAnnotations: true
+  # ingress-nginx 1.15+'s admission webhook separately classifies snippet
+  # *content* by risk level (independent of allowSnippetAnnotations and
+  # enableAnnotationValidations above) and rejects more_set_headers with
+  # "annotation group ConfigurationSnippet contains risky annotation based on
+  # ingress configuration" unless the configured threshold is raised. The
+  # octo-mesh chart's snippet is a known-safe, platform-controlled CORS header
+  # set (not user input), so raise the threshold to the most permissive level
+  # for this trusted local cluster. This is a raw controller ConfigMap key
+  # (https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/configmap/),
+  # not a first-class chart value.
+  config:
+    annotations-risk-level: "Critical"
+  service:
+    type: NodePort
+    nodePorts:
+      http: 30080
+      https: 30443
+  admissionWebhooks:
+    enabled: true
