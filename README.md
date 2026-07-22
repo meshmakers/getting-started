@@ -85,8 +85,9 @@ the Communication Operator — exactly the way managed OctoMesh environments wor
 ```pwsh
 ./om-status.ps1      # pods, helm releases, ports, URLs
 ./om-stop.ps1        # stop the cluster (data preserved)
-./om-start.ps1       # start it again
+./om-start.ps1       # start it again (waits for Identity, then restarts dependent services once)
 ./om-uninstall.ps1   # delete the cluster AND ALL DATA, untrust the CA
+                     # (keeps local-config.json with the selected version + license keys)
 ```
 
 ## Troubleshooting
@@ -108,13 +109,8 @@ the Communication Operator — exactly the way managed OctoMesh environments wor
   `om-start.ps1` handles this automatically: after a cold start it waits for
   Identity's JWKS and then restarts the token-validating services once. If you
   still see `401`s (e.g. after restarting the Docker VM without `om-start.ps1`),
-  run the remedy manually:
-  `kubectl --context kind-octomesh -n octo rollout restart deployment octo-mesh-asset-rep-services octo-mesh-bot-services octo-mesh-communication-controller-services octo-mesh-platform-services`
-* **Reporting pod `ImagePullBackOff` on Apple Silicon** — the reporting chart
-  currently resolves to an older, amd64-only image
-  (`octo-mesh-reporting-services:3.4.49.0`) until a newer reporting chart is
-  published. Workaround: override the image tag to a multi-arch release:
-  `helm upgrade octo-mesh-reporting octo-mesh-reporting --repo https://meshmakers.github.io/charts --version 3.4.49 --reuse-values --set image.tag=3.4.51.0 -n octo --kube-context kind-octomesh`
+  run the remedy manually (omit `octo-mesh-reporting` on the core profile):
+  `kubectl --context kind-octomesh -n octo rollout restart deployment octo-mesh-asset-rep-services octo-mesh-bot-services octo-mesh-communication-controller-services octo-mesh-platform-services octo-mesh-reporting`
 
 # Further reading
 

@@ -19,7 +19,9 @@ All commands run from `scripts/` with PowerShell 7.4+.
 ./om-login-local.ps1 [-tenantId meshtest] [-includeReporting $true]
 ./om-bootstrap-tenant.ps1 [-TenantId meshtest] [-IncludeSimulation]
 ./om-status.ps1
-./om-stop.ps1 / ./om-start.ps1          # stop/start the kind node container (data preserved)
+./om-stop.ps1 / ./om-start.ps1          # stop/start the kind node container (data preserved);
+                                        # om-start waits for Identity's JWKS after a cold start and
+                                        # restarts the token-validating services once (AB#4498 workaround)
 ./om-uninstall.ps1 [-Force] [-KeepCaTrust] [-KeepGeneratedFiles]   # deletes cluster + data
 ```
 
