@@ -31,27 +31,36 @@ function Invoke-OctoCli {
     }
 }
 
-# The active octo-cli context (set up by ./om-login-local.ps1) carries its own
-# service URIs. `Config` fully replaces the context on every call, so capture
-# the current URIs once and reuse them whenever we need to flip the active
-# tenant, instead of hardcoding hostnames here.
+# All octo-cli calls run against the dedicated 'getting-started_<tenant>'
+# context created by ./om-login-local.ps1 — activate it explicitly so other
+# contexts the user has configured are never touched.
+$OctoContextName = "getting-started_$TenantId"
+Invoke-OctoCli -CliArgs @("-c", "UseContext", "-n", $OctoContextName) `
+    -FailureHint "Context '$OctoContextName' not found - run ./om-login-local.ps1 first."
+
+# The context carries its own service URIs. `Config` fully replaces the active
+# context's options on every call (while keeping the login), so capture the
+# URIs once and reuse them whenever we need to flip the tenant, instead of
+# hardcoding hostnames here.
 # octo-cli prints a version banner before the JSON payload, so only keep
 # output from the opening '[' onward.
-$listContextsLines = octo-cli -c ListContexts -j
+$listContextsLines = octo-cli -c ListContexts -n $OctoContextName -j
 $jsonStart = ($listContextsLines | Select-String -Pattern "^\s*\[" | Select-Object -First 1).LineNumber
 if (-not $jsonStart) {
-    Write-Error "Could not parse 'octo-cli -c ListContexts -j' output."
+    Write-Error "Could not parse 'octo-cli -c ListContexts -n $OctoContextName -j' output."
     exit 1
 }
 $listContextsJson = ($listContextsLines | Select-Object -Skip ($jsonStart - 1)) -join "`n"
-$activeContext = ($listContextsJson | ConvertFrom-Json) | Where-Object { $_.isActive }
-if (-not $activeContext) {
-    Write-Error "No active octo-cli context found - run ./om-login-local.ps1 first."
+$octoContext = ($listContextsJson | ConvertFrom-Json) | Select-Object -First 1
+if (-not $octoContext) {
+    Write-Error "Context '$OctoContextName' not found - run ./om-login-local.ps1 first."
     exit 1
 }
-$svc = $activeContext.services
+$svc = $octoContext.services
 
 function Set-OctoCliTenant {
+    # Flips the tenant of the active 'getting-started' context; `Config` only
+    # ever mutates the active context, which this script pinned above.
     param([string]$Tid)
     $cfgArgs = @("-c", "Config", "-isu", $svc.identity, "-tid", $Tid)
     if ($svc.asset) { $cfgArgs += @("-asu", $svc.asset) }
@@ -59,7 +68,7 @@ function Set-OctoCliTenant {
     if ($svc.communication) { $cfgArgs += @("-csu", $svc.communication) }
     if ($svc.reporting) { $cfgArgs += @("-rsu", $svc.reporting) }
     if ($svc.ai) { $cfgArgs += @("-aisu", $svc.ai) }
-    Invoke-OctoCli -CliArgs $cfgArgs -FailureHint "Failed to switch the active octo-cli context tenant to '$Tid'."
+    Invoke-OctoCli -CliArgs $cfgArgs -FailureHint "Failed to switch the '$OctoContextName' context to tenant '$Tid'."
 }
 
 Write-Host "Creating tenant '$TenantId'..." -ForegroundColor Cyan
