@@ -1,4 +1,6 @@
 $schema: https://schemas.meshmakers.cloud/runtime-model.schema.json
+dependencies:
+  - System.Communication-[1.0,)
 entities:
   - rtId: '671000000000000000000001'
     ckTypeId: System.Communication/Adapter

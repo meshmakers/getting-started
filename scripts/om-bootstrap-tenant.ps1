@@ -10,6 +10,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $KubeContext = "kind-octomesh"
+$SystemTenantId = "octosystem"
 $PoolRtId = "670000000000000000000001"
 $MeshAdapterRtId = "670000000000000000000002"
 $SimulationAdapterRtId = "671000000000000000000001"
@@ -30,11 +31,49 @@ function Invoke-OctoCli {
     }
 }
 
+# The active octo-cli context (set up by ./om-login-local.ps1) carries its own
+# service URIs. `Config` fully replaces the context on every call, so capture
+# the current URIs once and reuse them whenever we need to flip the active
+# tenant, instead of hardcoding hostnames here.
+# octo-cli prints a version banner before the JSON payload, so only keep
+# output from the opening '[' onward.
+$listContextsLines = octo-cli -c ListContexts -j
+$jsonStart = ($listContextsLines | Select-String -Pattern "^\s*\[" | Select-Object -First 1).LineNumber
+if (-not $jsonStart) {
+    Write-Error "Could not parse 'octo-cli -c ListContexts -j' output."
+    exit 1
+}
+$listContextsJson = ($listContextsLines | Select-Object -Skip ($jsonStart - 1)) -join "`n"
+$activeContext = ($listContextsJson | ConvertFrom-Json) | Where-Object { $_.isActive }
+if (-not $activeContext) {
+    Write-Error "No active octo-cli context found - run ./om-login-local.ps1 first."
+    exit 1
+}
+$svc = $activeContext.services
+
+function Set-OctoCliTenant {
+    param([string]$Tid)
+    $cfgArgs = @("-c", "Config", "-isu", $svc.identity, "-tid", $Tid)
+    if ($svc.asset) { $cfgArgs += @("-asu", $svc.asset) }
+    if ($svc.bot) { $cfgArgs += @("-bsu", $svc.bot) }
+    if ($svc.communication) { $cfgArgs += @("-csu", $svc.communication) }
+    if ($svc.reporting) { $cfgArgs += @("-rsu", $svc.reporting) }
+    if ($svc.ai) { $cfgArgs += @("-aisu", $svc.ai) }
+    Invoke-OctoCli -CliArgs $cfgArgs -FailureHint "Failed to switch the active octo-cli context tenant to '$Tid'."
+}
+
 Write-Host "Creating tenant '$TenantId'..." -ForegroundColor Cyan
+# TenantsController's "create child tenant" endpoint is tenant-scoped: the
+# active context must point at the PARENT tenant (the system tenant) while
+# calling it, not at the tenant being created (which doesn't exist yet and
+# would otherwise 400 with "TenantId is required").
+Set-OctoCliTenant -Tid $SystemTenantId
 & octo-cli -c Create -tid $TenantId -db $TenantId
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Tenant creation failed - if it already exists, continuing is safe." -ForegroundColor Yellow
 }
+# Switch back to the target tenant for all remaining tenant-scoped operations.
+Set-OctoCliTenant -Tid $TenantId
 
 Write-Host "Enabling communication (seeds pool, mesh adapter, chart repository)..." -ForegroundColor Cyan
 Invoke-OctoCli -CliArgs @("-c", "EnableCommunication") -FailureHint "Check that you are logged in (./om-login-local.ps1) and the tenant exists."
