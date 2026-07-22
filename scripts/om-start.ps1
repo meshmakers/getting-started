@@ -66,9 +66,25 @@ if ($coldStart) {
 
 Write-Host "Waiting for pods to become ready (this can take a few minutes after a cold start)..."
 $deadline = (Get-Date).AddMinutes(10)
+$notReady = @()
 while ((Get-Date) -lt $deadline) {
-    $notReady = kubectl --context kind-octomesh -n octo get pods --no-headers 2>$null | Where-Object { $_ -notmatch "Running|Completed" }
-    if ($LASTEXITCODE -eq 0 -and -not $notReady) { break }
+    $pods = kubectl --context kind-octomesh -n octo get pods --no-headers 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        # A pod only counts as ready when all its containers are ready (READY n/n) -
+        # "0/1 Running" is still starting. Completed pods (jobs) are fine as-is.
+        $notReady = @($pods | Where-Object {
+                $cols = -split $_
+                if ($cols.Count -lt 3) { return $false }
+                $readyCounts = $cols[1] -split "/"
+                ($cols[2] -ne "Completed") -and (($cols[2] -ne "Running") -or ($readyCounts[0] -ne $readyCounts[1]))
+            })
+        if (-not $notReady) { break }
+    }
     Start-Sleep -Seconds 10
+}
+if ($notReady) {
+    Write-Host "Warning: some pods are still not ready:" -ForegroundColor Yellow
+    $notReady | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+    Write-Host "Check details with ./om-status.ps1."
 }
 Write-Host "Start done. Check details with ./om-status.ps1."

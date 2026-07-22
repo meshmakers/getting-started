@@ -29,17 +29,28 @@ else {
 
 if (-not $KeepCaTrust) {
     Write-Host "Removing the root CA from the OS trust store (may prompt for sudo/elevation)..." -ForegroundColor Cyan
+    $caRemovalFailed = $false
     if ($IsMacOS) {
         sudo security delete-certificate -c $RootCaCommonName /Library/Keychains/System.keychain 2>$null
+        if ($LASTEXITCODE -ne 0) { $caRemovalFailed = $true }
     }
     elseif ($IsWindows) {
-        Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -match [regex]::Escape($RootCaCommonName) } | Remove-Item -ErrorAction SilentlyContinue
+        try {
+            Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -match [regex]::Escape($RootCaCommonName) } | Remove-Item -ErrorAction Stop
+        }
+        catch {
+            $caRemovalFailed = $true
+        }
     }
     else {
         sudo rm -f /usr/local/share/ca-certificates/octomesh-getting-started-root-ca.crt
-        sudo update-ca-certificates --fresh | Out-Null
+        if ($LASTEXITCODE -ne 0) { $caRemovalFailed = $true }
+        if (-not $caRemovalFailed) {
+            sudo update-ca-certificates --fresh | Out-Null
+            if ($LASTEXITCODE -ne 0) { $caRemovalFailed = $true }
+        }
     }
-    if ($LASTEXITCODE -ne 0) {
+    if ($caRemovalFailed) {
         Write-Host "CA trust removal failed (non-fatal). You may need to remove '$RootCaCommonName' from your OS trust store manually." -ForegroundColor Yellow
     }
 }

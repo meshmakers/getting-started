@@ -15,7 +15,8 @@ in Docker) cluster — the same deployment model OctoMesh uses in real clusters.
 * [helm](https://helm.sh/docs/intro/install/) v3
 * openssl in PATH (`brew install openssl` / `winget install ShiningLight.OpenSSL.Dev`)
 * octo-cli (`choco install octo-cli` on Windows; download the self-contained binary for
-  macOS/Linux from the OctoMesh release page) — **minimum version 3.4.51**
+  macOS/Linux from the [Download Center](https://meshdownload.z6.web.core.windows.net/?tool=octo-cli)) —
+  **minimum version 3.4.51**
 * License keys (both prompted during installation):
   * [Duende IdentityServer](https://duendesoftware.com/products/identityserver#pricing) — community edition is free for small companies and open source
   * [AutoMapper](https://www.automapper.io/) — free tier available
