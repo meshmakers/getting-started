@@ -152,32 +152,47 @@ function Get-OctoMeshReleases {
 }
 
 # Charts that ship alongside octo-mesh but are versioned independently in the same
-# release index - a picked octo-mesh chart version is not guaranteed to also exist
-# for these, so Initialize-Configuration cross-checks the selection against all of them.
-$CompanionCharts = @("octo-mesh-reporting", "octo-mesh-adapter", "octo-plug-simulation")
+# release index (each repo releases on its own cadence). A picked octo-mesh chart
+# version is not guaranteed to also exist for these, so Initialize-Configuration
+# resolves each companion to the newest version it published at or below the
+# selected platform version, instead of requiring an exact match.
+# Maps chart name -> the local-config.json key its resolved version is persisted under.
+$CompanionChartConfigKeys = [ordered]@{
+    "octo-mesh-adapter"    = "adapterChartVersion"
+    "octo-plug-simulation" = "simulationChartVersion"
+    "octo-mesh-reporting"  = "reportingChartVersion"
+}
 
-function Get-MissingCompanionCharts([string]$IndexContent, [string]$ChartVersion) {
-    # Returns the names of companion charts that do NOT publish $ChartVersion.
+function Resolve-CompanionChartVersions([string]$IndexContent, [string]$PlatformChartVersion) {
+    # For each companion chart, finds the newest published chart version that is
+    # <= the selected platform version. Returns @{ Resolved = @{chartName=version}; Missing = @(chartName, ...) }
+    # rather than throwing, so callers can choose interactive re-prompt vs. hard failure.
+    $resolved = @{}
     $missing = [System.Collections.Generic.List[string]]::new()
-    foreach ($chartName in $CompanionCharts) {
-        $companionReleases = Get-ChartReleases -IndexContent $IndexContent -ChartName $chartName
-        if (-not ($companionReleases | Where-Object { $_.ChartVersion -eq $ChartVersion })) {
-            $missing.Add($chartName)
-        }
+    $platformVersion = [Version]$PlatformChartVersion
+    foreach ($chartName in $CompanionChartConfigKeys.Keys) {
+        $companion = Get-ChartReleases -IndexContent $IndexContent -ChartName $chartName |
+            Where-Object { [Version]$_.ChartVersion -le $platformVersion } |
+            Select-Object -First 1
+        if ($companion) { $resolved[$chartName] = $companion.ChartVersion }
+        else { $missing.Add($chartName) }
     }
-    return $missing
+    return [pscustomobject]@{ Resolved = $resolved; Missing = $missing }
 }
 
 function Get-CompanionChartMismatchMessage([string]$ChartVersion, [string[]]$MissingCharts) {
-    return "Version $ChartVersion is not available for: $($MissingCharts -join ', '). Choose a version published for all charts (the default/latest usually is)."
+    return "No published release of $($MissingCharts -join ', ') exists at or below platform version $ChartVersion. Choose a newer platform version (or check $ChartRepo/index.yaml)."
 }
 
 function Assert-CompanionChartVersions([string]$IndexContent, [string]$ChartVersion) {
-    # Non-interactive paths (-ChartVersion / -NonInteractive): fail hard on a mismatch.
-    $missing = Get-MissingCompanionCharts -IndexContent $IndexContent -ChartVersion $ChartVersion
-    if ($missing.Count -gt 0) {
-        throw (Get-CompanionChartMismatchMessage -ChartVersion $ChartVersion -MissingCharts $missing)
+    # Non-interactive paths (-ChartVersion / -NonInteractive): fail hard when any
+    # companion chart has no release at or below the selected platform version.
+    # Returns the resolved @{chartName=version} map on success.
+    $result = Resolve-CompanionChartVersions -IndexContent $IndexContent -PlatformChartVersion $ChartVersion
+    if ($result.Missing.Count -gt 0) {
+        throw (Get-CompanionChartMismatchMessage -ChartVersion $ChartVersion -MissingCharts $result.Missing)
     }
+    return $result.Resolved
 }
 
 function Read-MaskedInput([string]$prompt) {
@@ -200,12 +215,10 @@ function Initialize-Configuration {
         $releases = Get-ChartReleases -IndexContent $indexContent -ChartName "octo-mesh"
         $selected = $releases | Where-Object { $_.ChartVersion -eq $ChartVersion } | Select-Object -First 1
         if (-not $selected) { throw "Chart version '$ChartVersion' not found in $ChartRepo" }
-        Assert-CompanionChartVersions -IndexContent $indexContent -ChartVersion $selected.ChartVersion
     }
     elseif ($config.chartVersion -and $NonInteractive) {
         $indexContent = Get-ChartIndexContent
         $selected = [pscustomobject]@{ ChartVersion = $config.chartVersion; AppVersion = $config.appVersion }
-        Assert-CompanionChartVersions -IndexContent $indexContent -ChartVersion $selected.ChartVersion
     }
     else {
         $indexContent = Get-ChartIndexContent
@@ -213,7 +226,6 @@ function Initialize-Configuration {
         if ($releases.Count -eq 0) { throw "Could not fetch versions from $ChartRepo. Check your internet connection." }
         if ($NonInteractive) {
             $selected = $releases[0]
-            Assert-CompanionChartVersions -IndexContent $indexContent -ChartVersion $selected.ChartVersion
         }
         else {
             Write-Host ""
@@ -245,18 +257,27 @@ function Initialize-Configuration {
                     Write-Host "Invalid selection." -ForegroundColor Red
                     continue
                 }
-                $missing = Get-MissingCompanionCharts -IndexContent $indexContent -ChartVersion $candidate.ChartVersion
-                if ($missing.Count -gt 0) {
-                    Write-Host (Get-CompanionChartMismatchMessage -ChartVersion $candidate.ChartVersion -MissingCharts $missing) -ForegroundColor Red
+                $companionResult = Resolve-CompanionChartVersions -IndexContent $indexContent -PlatformChartVersion $candidate.ChartVersion
+                if ($companionResult.Missing.Count -gt 0) {
+                    Write-Host (Get-CompanionChartMismatchMessage -ChartVersion $candidate.ChartVersion -MissingCharts $companionResult.Missing) -ForegroundColor Red
                     continue
                 }
                 $selected = $candidate
             }
         }
     }
+    # Companion charts (adapter/simulation/reporting) release independently of the
+    # platform chart - resolve each to the newest version <= the selected platform
+    # version. Re-validates (cheaply, no network call) even the already-checked
+    # interactive selection, keeping this the single source of truth for the map.
+    $resolvedCompanions = Assert-CompanionChartVersions -IndexContent $indexContent -ChartVersion $selected.ChartVersion
     $config.chartVersion = $selected.ChartVersion
     $config.appVersion = $selected.AppVersion
+    foreach ($chartName in $CompanionChartConfigKeys.Keys) {
+        $config[$CompanionChartConfigKeys[$chartName]] = $resolvedCompanions[$chartName]
+    }
     Write-Host "Selected OctoMesh $($config.appVersion) (chart $($config.chartVersion))" -ForegroundColor Green
+    Write-Host "Companion charts: adapter $($config.adapterChartVersion), simulation $($config.simulationChartVersion), reporting $($config.reportingChartVersion)" -ForegroundColor Green
 
     # License keys
     if ($IdentityServerLicenseKey) { $config.identityServerLicenseKey = $IdentityServerLicenseKey }
@@ -537,7 +558,7 @@ function Install-OctoMesh {
 
 function Install-Reporting {
     if ($DeploymentProfile -ne "full") { return }
-    Write-Host "Installing reporting chart (octo-mesh-reporting $($config.chartVersion))..." -ForegroundColor Cyan
+    Write-Host "Installing reporting chart (octo-mesh-reporting $($config.reportingChartVersion))..." -ForegroundColor Cyan
     $caPath = Join-Path $GeneratedPath "local-root-ca.crt"
     # Forward slashes in --set-file paths (helm on Windows chokes on backslashes) -
     # see Install-Operator's comment for details.
@@ -553,7 +574,7 @@ function Install-Reporting {
     } | ConvertTo-Json -Depth 5 | Set-Content -Path $secretsFile -Encoding UTF8
     try {
         helm upgrade --install octo-mesh-reporting octo-mesh-reporting `
-            --repo $ChartRepo --version $config.chartVersion `
+            --repo $ChartRepo --version $config.reportingChartVersion `
             --namespace octo `
             --values (Join-Path $KubernetesPath "values/reporting-values.yaml") `
             --values $secretsFile `

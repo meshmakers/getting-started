@@ -41,7 +41,9 @@ The installer:
    for sudo/admin rights to trust it; skip with `-SkipTrustCa`),
 4. installs the OctoMesh platform and the Communication Operator from the public
    Helm chart repository (release versions only — you pick the version, latest is
-   the default).
+   the default). Companion chart versions (mesh adapter, simulation, reporting)
+   are resolved automatically to the newest release compatible with the chosen
+   platform version, since those repos release independently.
 
 ## Create the admin user and log in
 

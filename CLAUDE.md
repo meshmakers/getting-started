@@ -39,8 +39,11 @@ All commands run from `scripts/` with PowerShell 7.4+.
   resolve 127.0.0.1 = themselves).
 * Charts installed: `octo-mesh-crds` and `octo-mesh-communication-operator`
   (`autoManagePools=true`) in `octo-operator-system`; `octo-mesh` (and
-  `octo-mesh-reporting` on the full profile) in `octo`. One consistent chart version
-  for everything, selected at install time from the public index.
+  `octo-mesh-reporting` on the full profile) in `octo`. `octo-mesh-crds` and
+  `octo-mesh-communication-operator` ride the same chart version as `octo-mesh`
+  (selected at install time from the public index). The mesh adapter, simulation,
+  and reporting charts release independently, so each is resolved separately to
+  the newest version at or below the selected platform version.
 * `serviceDefaults.environment=production` makes `EnableCommunication` apply the
   Release blueprint variant, which seeds: Pool `670000000000000000000001`,
   MeshAdapter `670000000000000000000002` (chart `octo-mesh-adapter`), and

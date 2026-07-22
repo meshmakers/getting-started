@@ -39,8 +39,12 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "Enabling communication (seeds pool, mesh adapter, chart repository)..." -ForegroundColor Cyan
 Invoke-OctoCli -CliArgs @("-c", "EnableCommunication") -FailureHint "Check that you are logged in (./om-login-local.ps1) and the tenant exists."
 
-Write-Host "Pinning the mesh adapter chart version to $($config.chartVersion)..." -ForegroundColor Cyan
-Invoke-OctoCli -CliArgs @("-c", "UpdateWorkloadChartVersion", "-id", $MeshAdapterRtId, "-cv", $config.chartVersion) `
+if (-not $config.adapterChartVersion) {
+    Write-Error "local-config.json has no adapterChartVersion - re-run ./om-install.ps1 to resolve it."
+    exit 1
+}
+Write-Host "Pinning the mesh adapter chart version to $($config.adapterChartVersion)..." -ForegroundColor Cyan
+Invoke-OctoCli -CliArgs @("-c", "UpdateWorkloadChartVersion", "-id", $MeshAdapterRtId, "-cv", $config.adapterChartVersion) `
     -FailureHint "The blueprint-seeded mesh adapter was not found - EnableCommunication may have failed."
 
 Write-Host "Deploying the pool (operator creates the CommunicationPool resource)..." -ForegroundColor Cyan
@@ -50,10 +54,14 @@ Write-Host "Deploying the mesh adapter..." -ForegroundColor Cyan
 Invoke-OctoCli -CliArgs @("-c", "DeployWorkload", "-id", $MeshAdapterRtId) -FailureHint "Check 'octo-cli -c GetAdapters' for deployment errors."
 
 if ($IncludeSimulation) {
+    if (-not $config.simulationChartVersion) {
+        Write-Error "local-config.json has no simulationChartVersion - re-run ./om-install.ps1 to resolve it."
+        exit 1
+    }
     Write-Host "Importing and deploying the simulation adapter..." -ForegroundColor Cyan
     $template = Get-Content (Join-Path $PSScriptRoot "kubernetes/simulation-adapter.yaml") -Raw
     $importFile = Join-Path $PSScriptRoot "kubernetes/.generated/simulation-adapter.yaml"
-    $template -replace "__CHART_VERSION__", $config.chartVersion | Set-Content -Path $importFile -Encoding UTF8
+    $template -replace "__CHART_VERSION__", $config.simulationChartVersion | Set-Content -Path $importFile -Encoding UTF8
     Invoke-OctoCli -CliArgs @("-c", "ImportRt", "-f", $importFile, "-w") -FailureHint "Simulation adapter import failed."
     Invoke-OctoCli -CliArgs @("-c", "DeployWorkload", "-id", $SimulationAdapterRtId) -FailureHint "Check 'octo-cli -c GetAdapters' for deployment errors."
 }
