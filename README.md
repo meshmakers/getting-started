@@ -7,17 +7,15 @@ in Docker) cluster — the same deployment model OctoMesh uses in real clusters.
 ## Prerequisites
 
 * [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine on Linux)
-  * **Note:** the OctoMesh service images are currently amd64-only, so an amd64 host
-    (Windows, Linux, or Intel Mac) is required. Apple Silicon support arrives as soon
-    as the multi-arch images are published.
+  * **Note:** images are multi-arch (amd64/arm64) as of release 3.4.51; Apple Silicon
+    works natively. Releases older than 3.4.51 are amd64-only.
 * [PowerShell 7.4+](https://learn.microsoft.com/powershell/scripting/install/installing-powershell)
 * [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation) v0.31+ (`brew install kind` / `winget install Kubernetes.kind`)
 * [kubectl](https://kubernetes.io/docs/tasks/tools/)
 * [helm](https://helm.sh/docs/intro/install/) v3
 * openssl in PATH (`brew install openssl` / `winget install ShiningLight.OpenSSL.Dev`)
 * octo-cli (`choco install octo-cli` on Windows; download the self-contained binary for
-  macOS/Linux from the OctoMesh release page) — **minimum version: the first release
-  that includes the `DeployPool` command**
+  macOS/Linux from the OctoMesh release page) — **minimum version 3.4.51**
 * License keys (both prompted during installation):
   * [Duende IdentityServer](https://duendesoftware.com/products/identityserver#pricing) — community edition is free for small companies and open source
   * [AutoMapper](https://www.automapper.io/) — free tier available
@@ -104,6 +102,18 @@ the Communication Operator — exactly the way managed OctoMesh environments wor
 * **Browser warns about the certificate** — the root CA trust step was skipped or
   failed. Re-run `./om-install.ps1` without `-SkipTrustCa`, or trust
   `scripts/kubernetes/.generated/local-root-ca.crt` manually.
+* **After `om-start.ps1`, API calls fail with `401` for a while** — when all pods
+  cold-start together, some services may cache Identity's OIDC discovery metadata
+  before Identity is fully ready, and keep rejecting valid tokens for a long time
+  (the refresh interval is measured in hours). Remedy:
+  `kubectl --context kind-octomesh -n octo rollout restart deployment <affected-service>`
+  (e.g. `octo-mesh-communication-controller-services` or `octo-mesh-asset-rep-services`),
+  or simply re-run `./om-stop.ps1` followed by `./om-start.ps1`.
+* **Reporting pod `ImagePullBackOff` on Apple Silicon** — the reporting chart
+  currently resolves to an older, amd64-only image
+  (`octo-mesh-reporting-services:3.4.49.0`) until a newer reporting chart is
+  published. Workaround: override the image tag to a multi-arch release:
+  `helm upgrade octo-mesh-reporting octo-mesh-reporting --repo https://meshmakers.github.io/charts --version 3.4.49 --reuse-values --set image.tag=3.4.51.0 -n octo --kube-context kind-octomesh`
 
 # Further reading
 

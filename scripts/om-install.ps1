@@ -68,28 +68,17 @@ function Test-Prerequisites {
         }
     }
 
-    # arm64 preflight warning: OctoMesh service images are currently amd64-only, so the
-    # platform phase (Task 6) will not start pods on an ARM Docker engine. Infrastructure
-    # (mongo/rabbitmq/crate/ingress-nginx/cert-manager) is multi-arch and works fine.
+    # arm64 informational note: as of release 3.4.51, OctoMesh service images are
+    # multi-arch (amd64/arm64) and run natively on ARM Docker engines - proven on a
+    # local arm64 kind cluster. Only releases older than 3.4.51 are amd64-only, so
+    # this is a heads-up for that case rather than a warning that blocks the install.
     if (Get-Command docker -ErrorAction SilentlyContinue) {
         $dockerArch = (docker info --format '{{.Architecture}}' 2>$null).Trim()
         if ($dockerArch -in @("aarch64", "arm64")) {
             Write-Host ""
-            Write-Host "WARNING: Docker engine architecture is $dockerArch (ARM)." -ForegroundColor Yellow
-            Write-Host "OctoMesh service images are currently amd64-only, so platform service pods will NOT" -ForegroundColor Yellow
-            Write-Host "start on this machine until multi-arch images are published. Infrastructure" -ForegroundColor Yellow
-            Write-Host "(MongoDB, RabbitMQ, CrateDB, ingress-nginx, cert-manager) works fine on ARM." -ForegroundColor Yellow
-            Write-Host "An amd64 host is required for the full quickstart." -ForegroundColor Yellow
-            if ($NonInteractive) {
-                Write-Host "Continuing (-NonInteractive)." -ForegroundColor Yellow
-            }
-            else {
-                $continue = Read-Host "Continue anyway? (y/N)"
-                if ($continue -ne "y" -and $continue -ne "Y") {
-                    Write-Host "Aborted." -ForegroundColor Red
-                    $allPassed = $false
-                }
-            }
+            Write-Host "INFO: Docker engine architecture is $dockerArch (ARM)." -ForegroundColor Cyan
+            Write-Host "Releases before 3.4.51 ship amd64-only service images and will not run on ARM" -ForegroundColor Cyan
+            Write-Host "hosts - choose 3.4.51 or newer there." -ForegroundColor Cyan
         }
     }
 
@@ -552,7 +541,7 @@ function Install-OctoMesh {
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Not all platform pods became Ready within 10 minutes." -ForegroundColor Yellow
         Write-Host "Check './om-status.ps1' and 'kubectl --context $KubeContext -n octo describe pods' for details." -ForegroundColor Yellow
-        Write-Host "(On hosts without amd64 support this is expected until multi-arch images are published.)" -ForegroundColor Yellow
+        Write-Host "(On ARM hosts with a release older than 3.4.51, this is expected - those service images are amd64-only.)" -ForegroundColor Yellow
     }
 }
 

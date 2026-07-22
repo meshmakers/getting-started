@@ -61,6 +61,8 @@ All commands run from `scripts/` with PowerShell 7.4+.
 * Everything must work for EXTERNAL users: public charts, public Docker Hub images,
   release versions only. Never reference docker.mm.cloud or main-latest tags.
 * Scripts are standalone — no octo-tools checkout, no monorepo assumptions.
+* Service images are multi-arch (amd64/arm64) as of release 3.4.51; releases older
+  than 3.4.51 are amd64-only. octo-cli minimum version is 3.4.51.
 * Dev-grade default credentials are intentional (quickstart), but nothing generated
   or secret may be committed.
 * All artifacts in English. Commit format: `AB#<n> <New/Fix>: <description>`.
