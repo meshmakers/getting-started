@@ -102,13 +102,14 @@ the Communication Operator — exactly the way managed OctoMesh environments wor
 * **Browser warns about the certificate** — the root CA trust step was skipped or
   failed. Re-run `./om-install.ps1` without `-SkipTrustCa`, or trust
   `scripts/kubernetes/.generated/local-root-ca.crt` manually.
-* **After `om-start.ps1`, API calls fail with `401` for a while** — when all pods
-  cold-start together, some services may cache Identity's OIDC discovery metadata
-  before Identity is fully ready, and keep rejecting valid tokens for a long time
-  (the refresh interval is measured in hours). Remedy:
-  `kubectl --context kind-octomesh -n octo rollout restart deployment <affected-service>`
-  (e.g. `octo-mesh-communication-controller-services` or `octo-mesh-asset-rep-services`),
-  or simply re-run `./om-stop.ps1` followed by `./om-start.ps1`.
+* **After a cluster cold start, API calls fail with `401`** — services that boot
+  while Identity is not yet reachable cache a broken OIDC metadata state and then
+  reject valid tokens until their pods are restarted (the state does not self-heal).
+  `om-start.ps1` handles this automatically: after a cold start it waits for
+  Identity's JWKS and then restarts the token-validating services once. If you
+  still see `401`s (e.g. after restarting the Docker VM without `om-start.ps1`),
+  run the remedy manually:
+  `kubectl --context kind-octomesh -n octo rollout restart deployment octo-mesh-asset-rep-services octo-mesh-bot-services octo-mesh-communication-controller-services octo-mesh-platform-services`
 * **Reporting pod `ImagePullBackOff` on Apple Silicon** — the reporting chart
   currently resolves to an older, amd64-only image
   (`octo-mesh-reporting-services:3.4.49.0`) until a newer reporting chart is
