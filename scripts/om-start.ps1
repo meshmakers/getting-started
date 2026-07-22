@@ -20,7 +20,7 @@ else {
 }
 
 if ($coldStart) {
-    # TEMPORARY workaround for a platform issue: services that boot while the
+    # TEMPORARY workaround for platform bug AB#4498: services that boot while the
     # identity service is not yet reachable cache a broken OIDC metadata state
     # and then reject valid tokens with 401 until their pods are restarted.
     # The broken state never self-heals (measured: >2h idle, 35 min under
