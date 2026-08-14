@@ -14,6 +14,13 @@ operator:
   # rewrites *.127-0-0-1.nip.io to ingress-nginx, and the root CA (secrets.rootCa)
   # makes the operator trust the local certificate.
   communicationControllerUri: "https://communication.127-0-0-1.nip.io"
+  # Identity authority the operator projects into every workload it deploys. Adapters
+  # validate bearer tokens against it, so without this a secured FromHttpRequest@2
+  # route rejects every caller: the adapter falls back to its compiled-in loopback
+  # default, refuses to use it, and disables JWT authentication altogether. Same
+  # public URI as the rest — the CoreDNS rewrite makes it resolvable in-cluster and
+  # the root CA makes the certificate trusted.
+  authUri: "https://identity.127-0-0-1.nip.io"
   adapterIgnoreCertificateValidation: false
   # Empty registry: workload images are pulled from public Docker Hub.
   imageRegistry: ""
