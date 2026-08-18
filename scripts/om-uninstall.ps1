@@ -1,15 +1,21 @@
 #!/usr/bin/env pwsh
-# Deletes the OctoMesh kind cluster and ALL its data, and removes the trusted root CA.
+# Deletes the OctoMesh kind cluster and ALL its data.
+# The local root CA (and its trust in the OS/browser stores) is KEPT by default so
+# the next install reuses it and certificates stay trusted - pass -PurgeCa to drop it.
 param(
     [switch]$Force = $false,
-    [switch]$KeepCaTrust = $false,
-    [switch]$KeepGeneratedFiles = $false
+    [switch]$PurgeCa = $false,
+    [switch]$KeepGeneratedFiles = $false,
+    [switch]$NonInteractive = $false
 )
 
 $ErrorActionPreference = "Stop"
 $ClusterName = "octomesh"
-$RootCaCommonName = "OctoMesh Getting Started Root CA"
-$GeneratedPath = Join-Path $PSScriptRoot "kubernetes/.generated"
+$KubernetesPath = Join-Path $PSScriptRoot "kubernetes"
+$GeneratedPath = Join-Path $KubernetesPath ".generated"
+$CaPath = Join-Path $KubernetesPath ".ca"
+
+. (Join-Path $KubernetesPath "ca-trust.ps1")
 
 if (-not $Force) {
     Write-Host "This deletes the kind cluster '$ClusterName' including ALL DATA (MongoDB, CrateDB volumes)." -ForegroundColor Yellow
@@ -27,31 +33,15 @@ else {
     Write-Host "No kind cluster '$ClusterName' found." -ForegroundColor Yellow
 }
 
-if (-not $KeepCaTrust) {
-    Write-Host "Removing the root CA from the OS trust store (may prompt for sudo/elevation)..." -ForegroundColor Cyan
-    $caRemovalFailed = $false
-    if ($IsMacOS) {
-        sudo security delete-certificate -c $RootCaCommonName /Library/Keychains/System.keychain 2>$null
-        if ($LASTEXITCODE -ne 0) { $caRemovalFailed = $true }
+if ($PurgeCa) {
+    Write-Host "Removing the root CA from the OS and browser trust stores (may prompt for sudo/elevation)..." -ForegroundColor Cyan
+    if (-not (Remove-CaFromOsStore)) {
+        Write-Host "CA trust removal failed (non-fatal). You may need to remove the 'OctoMesh Getting Started Root CA' from your OS trust store manually." -ForegroundColor Yellow
     }
-    elseif ($IsWindows) {
-        try {
-            Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -match [regex]::Escape($RootCaCommonName) } | Remove-Item -ErrorAction Stop
-        }
-        catch {
-            $caRemovalFailed = $true
-        }
-    }
-    else {
-        sudo rm -f /usr/local/share/ca-certificates/octomesh-getting-started-root-ca.crt
-        if ($LASTEXITCODE -ne 0) { $caRemovalFailed = $true }
-        if (-not $caRemovalFailed) {
-            sudo update-ca-certificates --fresh | Out-Null
-            if ($LASTEXITCODE -ne 0) { $caRemovalFailed = $true }
-        }
-    }
-    if ($caRemovalFailed) {
-        Write-Host "CA trust removal failed (non-fatal). You may need to remove '$RootCaCommonName' from your OS trust store manually." -ForegroundColor Yellow
+    Remove-CaFromNssStores -NonInteractive:$NonInteractive
+    if (Test-Path $CaPath) {
+        Write-Host "Removing the persisted root CA ($CaPath)..." -ForegroundColor Cyan
+        Remove-Item -Recurse -Force $CaPath
     }
 }
 
@@ -62,3 +52,10 @@ if (-not $KeepGeneratedFiles -and (Test-Path $GeneratedPath)) {
 
 Write-Host "Uninstall complete." -ForegroundColor Green
 Write-Host "local-config.json (version + license keys) was kept for the next install."
+if ($PurgeCa) {
+    Write-Host "The root CA was removed - the next install creates a new one and re-trusts it."
+}
+else {
+    Write-Host "The root CA in kubernetes/.ca was kept, so the next install reuses it and your"
+    Write-Host "browsers keep trusting the local certificates (use -PurgeCa to drop it)."
+}

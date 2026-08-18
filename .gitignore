@@ -409,4 +409,7 @@ scripts/octo-mesh/
 
 # kind/helm deployment — generated local artifacts (certs, keys, CA, config)
 scripts/kubernetes/.generated/
+# Persisted local root CA (cert + private key) — kept across reinstalls so browser
+# trust survives, but never tracked.
+scripts/kubernetes/.ca/
 scripts/kubernetes/local-config.json

@@ -22,7 +22,8 @@ All commands run from `scripts/` with PowerShell 7.4+.
 ./om-stop.ps1 / ./om-start.ps1          # stop/start the kind node container (data preserved);
                                         # om-start waits for Identity's JWKS after a cold start and
                                         # restarts the token-validating services once (AB#4498 workaround)
-./om-uninstall.ps1 [-Force] [-KeepCaTrust] [-KeepGeneratedFiles]   # deletes cluster + data
+./om-uninstall.ps1 [-Force] [-PurgeCa] [-KeepGeneratedFiles]   # deletes cluster + data;
+                                        # keeps the local root CA (and its trust) unless -PurgeCa
 ```
 
 ## Architecture
@@ -33,8 +34,17 @@ All commands run from `scripts/` with PowerShell 7.4+.
   CrateDB single node), `octo` (platform services + operator-deployed adapters),
   `octo-operator-system` (CRDs + Communication Operator), plus ingress-nginx and
   cert-manager.
-* TLS: cert-manager self-signed root CA (CN "OctoMesh Getting Started Root CA")
-  behind ClusterIssuer `mm-cloud-issuer` (same name as managed environments).
+* TLS: self-signed root CA (CN "OctoMesh Getting Started Root CA") behind
+  ClusterIssuer `mm-cloud-issuer` (same name as managed environments). The CA is
+  bootstrapped once by cert-manager (`kubernetes/root-ca-bootstrap.yaml`), then
+  cert + key are persisted to `scripts/kubernetes/.ca/` and re-seeded into the
+  `local-root-ca-tls` secret on later installs (the bootstrap Certificate is then
+  skipped), so host and browser trust survives a reinstall. Trust plumbing lives in
+  `kubernetes/ca-trust.ps1`: OS store on all platforms, plus NSS via `certutil` for
+  Chrome (`~/.pki/nssdb`) and Firefox profiles on Linux, and
+  `security.enterprise_roots.enabled` in each Firefox profile's `user.js` on
+  Windows/macOS. NSS writes require Chrome/Firefox to be closed — the scripts detect
+  running browsers and ask for a `yes` to close them.
 * Hostnames: `https://{identity,assets,bots,communication,platform,studio,reporting}.127-0-0-1.nip.io`.
   A CoreDNS rewrite resolves `*.127-0-0-1.nip.io` to ingress-nginx inside the cluster
   (pods fetch JWKS from the public identity URI — without the rewrite they would
@@ -55,8 +65,9 @@ All commands run from `scripts/` with PowerShell 7.4+.
   The Studio OIDC client is blueprint-seeded from `services.studio.publicUri` —
   there is no manual client-registration script anymore.
 * Generated local state (gitignored): `scripts/kubernetes/.generated/` (signing key
-  PFX, root CA, Mongo keyfile, operator webhook certs), `scripts/kubernetes/local-config.json`
-  (chart version + license keys).
+  PFX, root CA copy for chart values, Mongo keyfile, operator webhook certs),
+  `scripts/kubernetes/.ca/` (persistent root CA cert + key — survives uninstall),
+  `scripts/kubernetes/local-config.json` (chart version + license keys).
 
 ## Key constraints
 

@@ -1,31 +1,7 @@
-# Local self-signed root CA fronted by a CA ClusterIssuer named exactly as the
-# managed environments (mm-cloud-issuer), so chart values stay portable.
-apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
-metadata:
-  name: selfsigned-bootstrap
-spec:
-  selfSigned: {}
----
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: local-root-ca
-  namespace: cert-manager
-spec:
-  isCA: true
-  # Distinct CN so trust/untrust never collides with the octo-tools dev cluster CA.
-  commonName: OctoMesh Getting Started Root CA
-  secretName: local-root-ca-tls
-  duration: 87600h          # 10 years
-  privateKey:
-    algorithm: ECDSA
-    size: 256
-  issuerRef:
-    name: selfsigned-bootstrap
-    kind: ClusterIssuer
-    group: cert-manager.io
----
+# CA ClusterIssuer named exactly as in the managed environments (mm-cloud-issuer),
+# so chart values stay portable. Signs with the root CA in local-root-ca-tls, which
+# is either bootstrapped by root-ca-bootstrap.yaml or restored from .ca/ by
+# om-install.ps1.
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
