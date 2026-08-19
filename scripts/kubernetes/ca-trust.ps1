@@ -5,10 +5,12 @@
 #   * OS store           - Chrome/Edge/Safari on Windows and macOS, curl/octo-cli everywhere.
 #   * NSS (Linux only)   - Chrome/Chromium read ~/.pki/nssdb, Firefox reads per-profile cert9.db.
 #                          update-ca-certificates does NOT feed these, so they are handled here.
+#                          The sqlite backend (cert9.db) accepts certutil writes while the
+#                          browser is running, so the write is always attempted first and
+#                          the browsers are only closed if a database turns out to be
+#                          locked. Either way the browser must be restarted to see the CA.
 #   * Firefox on Windows/macOS - trusts the OS root store once
 #                          security.enterprise_roots.enabled is set, which we write to user.js.
-# NSS databases are cached in memory by a running browser, so callers must close
-# Chrome/Firefox first (see Assert-BrowsersClosed).
 
 $script:CaNickname = "OctoMesh Getting Started Root CA"
 # Executable names of the browsers that keep their own certificate stores.
@@ -59,26 +61,24 @@ function Get-RunningBrowserProcesses {
 }
 
 function Assert-BrowsersClosed([switch]$NonInteractive) {
-    # NSS certificate databases are only re-read on browser start, and a running
-    # browser can overwrite them on exit - so the CA must be (un)installed while
-    # Chrome and Firefox are closed. Returns $false when the caller should skip
-    # the NSS/Firefox steps.
+    # Fallback for the rare case where a certificate database is locked by a running
+    # browser: offers to close Chrome/Firefox so the write can be retried. Returns
+    # $false when the caller should give up on the affected stores.
     $running = Get-RunningBrowserProcesses
     if ($running.Count -eq 0) { return $true }
 
     $list = ($running | ForEach-Object { Get-BrowserProcessBaseName $_.ProcessName } | Sort-Object -Unique) -join ", "
     Write-Host ""
-    Write-Host "Chrome/Firefox are running ($list). Their certificate databases can only be" -ForegroundColor Yellow
-    Write-Host "updated while they are closed." -ForegroundColor Yellow
+    Write-Host "A browser certificate database is locked by a running browser ($list)." -ForegroundColor Yellow
     if ($NonInteractive) {
-        Write-Host "Running non-interactively - skipping the browser trust stores. Close the browsers" -ForegroundColor Yellow
-        Write-Host "and re-run ./om-install.ps1 to trust the CA in Chrome and Firefox." -ForegroundColor Yellow
+        Write-Host "Running non-interactively - skipping the affected store(s). Close the browsers" -ForegroundColor Yellow
+        Write-Host "and re-run ./om-install.ps1 to trust the CA there." -ForegroundColor Yellow
         return $false
     }
-    Write-Host "They can be reopened as soon as the certificate is installed (a few seconds)." -ForegroundColor Yellow
+    Write-Host "They can be reopened immediately afterwards." -ForegroundColor Yellow
     $confirm = Read-Host "Type 'yes' to close them now"
     if ($confirm -ne "yes") {
-        Write-Host "Skipping the browser trust stores - Chrome and Firefox will warn about the certificate." -ForegroundColor Yellow
+        Write-Host "Skipping the affected store(s) - that browser will warn about the certificate." -ForegroundColor Yellow
         return $false
     }
     foreach ($p in $running) {
@@ -186,12 +186,16 @@ function Remove-FirefoxEnterpriseRoots {
     }
 }
 
+function Add-CaToNssStore([string]$Certutil, [string]$Db, [string]$CrtPath) {
+    & $Certutil -D -d "sql:$Db" -n $script:CaNickname 2>$null | Out-Null
+    & $Certutil -A -d "sql:$Db" -t "C,," -n $script:CaNickname -i $CrtPath 2>&1 | Out-Null
+    return ($LASTEXITCODE -eq 0)
+}
+
 function Add-CaToNssStores([string]$CrtPath, [switch]$NonInteractive) {
     $dbs = Get-NssDatabasePaths
     $firefoxProfiles = Get-FirefoxProfilePaths
     if ($dbs.Count -eq 0 -and $firefoxProfiles.Count -eq 0) { return }
-
-    if (-not (Assert-BrowsersClosed -NonInteractive:$NonInteractive)) { return }
 
     if ($IsWindows -or $IsMacOS) {
         Set-FirefoxEnterpriseRoots
@@ -209,32 +213,75 @@ function Add-CaToNssStores([string]$CrtPath, [switch]$NonInteractive) {
         return
     }
 
+    # Write to every store first - cert9.db is sqlite and normally accepts this with the
+    # browser open. Closing the browsers is only needed for stores that reject the write.
+    $locked = @()
     foreach ($db in $dbs) {
-        & $certutil -D -d "sql:$db" -n $script:CaNickname 2>$null | Out-Null
-        & $certutil -A -d "sql:$db" -t "C,," -n $script:CaNickname -i $CrtPath 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) {
+        if (Add-CaToNssStore $certutil $db $CrtPath) {
             Write-Host "  Trusted in NSS store $db" -ForegroundColor Green
         }
         else {
-            Write-Host "  Could not write to NSS store $db (non-fatal)." -ForegroundColor Yellow
+            $locked += $db
         }
     }
+
+    if ($locked.Count -gt 0 -and (Assert-BrowsersClosed -NonInteractive:$NonInteractive)) {
+        foreach ($db in @($locked)) {
+            if (Add-CaToNssStore $certutil $db $CrtPath) {
+                Write-Host "  Trusted in NSS store $db" -ForegroundColor Green
+                $locked = @($locked | Where-Object { $_ -ne $db })
+            }
+        }
+    }
+    foreach ($db in $locked) {
+        Write-Host "  Could not write to NSS store $db (non-fatal) - close that browser and re-run ./om-install.ps1." -ForegroundColor Yellow
+    }
+
+    if ((Get-RunningBrowserProcesses).Count -gt 0) {
+        Write-Host "  Restart Chrome/Firefox for the new certificate to take effect." -ForegroundColor Cyan
+    }
+}
+
+function Test-CaInNssStore([string]$Certutil, [string]$Db) {
+    & $Certutil -L -d "sql:$Db" -n $script:CaNickname 2>$null | Out-Null
+    return ($LASTEXITCODE -eq 0)
 }
 
 function Remove-CaFromNssStores([switch]$NonInteractive) {
     $dbs = Get-NssDatabasePaths
     $firefoxProfiles = Get-FirefoxProfilePaths
     if ($dbs.Count -eq 0 -and $firefoxProfiles.Count -eq 0) { return }
-    $certutil = Get-NssCertutil
-    if (-not $certutil -and $firefoxProfiles.Count -eq 0) { return }
-    if (-not (Assert-BrowsersClosed -NonInteractive:$NonInteractive)) { return }
 
     if ($IsWindows -or $IsMacOS) { Remove-FirefoxEnterpriseRoots }
+
+    $certutil = Get-NssCertutil
     if (-not $certutil) { return }
+
+    # Same shape as adding: try first, ask to close browsers only for what still holds
+    # the certificate afterwards. An entry that was never there counts as removed.
+    $removed = 0
+    $locked = @()
     foreach ($db in $dbs) {
+        if (-not (Test-CaInNssStore $certutil $db)) { continue }
         & $certutil -D -d "sql:$db" -n $script:CaNickname 2>$null | Out-Null
+        if (Test-CaInNssStore $certutil $db) { $locked += $db } else { $removed++ }
     }
-    Write-Host "  Removed the CA from $($dbs.Count) browser certificate store(s)." -ForegroundColor Green
+
+    if ($locked.Count -gt 0 -and (Assert-BrowsersClosed -NonInteractive:$NonInteractive)) {
+        foreach ($db in @($locked)) {
+            & $certutil -D -d "sql:$db" -n $script:CaNickname 2>$null | Out-Null
+            if (-not (Test-CaInNssStore $certutil $db)) {
+                $removed++
+                $locked = @($locked | Where-Object { $_ -ne $db })
+            }
+        }
+    }
+    if ($removed -gt 0) {
+        Write-Host "  Removed the CA from $removed browser certificate store(s)." -ForegroundColor Green
+    }
+    foreach ($db in $locked) {
+        Write-Host "  Could not remove the CA from $db (non-fatal) - close that browser and re-run." -ForegroundColor Yellow
+    }
 }
 
 function Test-CaTrustedInOsStore([string]$CrtPath) {

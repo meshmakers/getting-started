@@ -44,10 +44,13 @@ All commands run from `scripts/` with PowerShell 7.4+.
 * Trust plumbing lives in `kubernetes/ca-trust.ps1`, shared by install/uninstall:
   OS store on all platforms, plus NSS via `certutil` for Chrome (`~/.pki/nssdb`) and
   Firefox profiles on Linux, and `security.enterprise_roots.enabled` in each Firefox
-  profile's `user.js` on Windows/macOS. NSS databases can only be written while the
-  browsers are closed, so the scripts detect running Chrome/Firefox (matching a
-  normalized executable name — on Linux `ProcessName` is Chrome's whole command line)
-  and ask for a `yes` before terminating them.
+  profile's `user.js` on Windows/macOS. The sqlite `cert9.db` backend accepts writes
+  from a running browser (verified against a live headless Firefox), so the write is
+  always attempted first and the browser only has to be restarted to pick the CA up.
+  Closing browsers is a fallback for a locked database: the scripts then detect
+  running Chrome/Firefox (matching a normalized executable name — on Linux
+  `ProcessName` is Chrome's whole command line) and ask for a `yes` before
+  terminating them.
 * Hostnames: `https://{identity,assets,bots,communication,platform,studio,reporting}.127-0-0-1.nip.io`.
   A CoreDNS rewrite resolves `*.127-0-0-1.nip.io` to ingress-nginx inside the cluster
   (pods fetch JWKS from the public identity URI — without the rewrite they would

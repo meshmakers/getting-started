@@ -40,8 +40,10 @@ The installer:
    the OS, Chrome and Firefox (you will be asked for sudo/admin rights; skip with
    `-SkipTrustCa`). The CA private key never leaves the cluster, so every install
    creates a fresh CA and re-trusts it — expect the sudo/admin prompt on each
-   install, and note that Chrome and Firefox only re-read their certificate stores
-   on start, so the installer asks to close them when they are running,
+   install. Running browsers are not in the way: the certificate is installed even
+   while Chrome and Firefox are open, you just have to restart them afterwards to
+   pick it up. Only if a browser has its certificate database locked does the
+   installer offer to close it for you,
 4. installs the OctoMesh platform and the Communication Operator from the public
    Helm chart repository (release versions only — you pick the version, latest is
    the default). Companion chart versions (mesh adapter, simulation, reporting)
@@ -107,7 +109,8 @@ the Communication Operator — exactly the way managed OctoMesh environments wor
   are taken (e.g. by another local database). Stop the conflicting service first.
 * **Browser warns about the certificate** — the root CA trust step was skipped or
   failed. Close Chrome/Firefox and re-run `./om-install.ps1` without `-SkipTrustCa`
-  (it is safe to re-run on a live installation), or trust
+  (it is safe to re-run on a live installation) — remember to restart the browser
+  afterwards — or trust
   `scripts/kubernetes/.generated/local-root-ca.crt` manually. On Linux, Chrome and Firefox
   keep their own certificate stores — the installer needs NSS `certutil`
   (`sudo apt install libnss3-tools`) to write to them.
