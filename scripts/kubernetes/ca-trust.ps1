@@ -16,6 +16,10 @@ $script:CaNickname = "OctoMesh Getting Started Root CA"
 # with its browser.
 $script:BrowserProcessPattern = '^(google-)?chrom(e|ium)(-browser|-stable|-beta|-dev)?$|^firefox(-bin|-esr|-developer-edition)?$|^Google Chrome( Beta| Canary| Dev)?$|^Firefox( Developer Edition| Nightly)?$'
 $script:LinuxCaFileName = "octomesh-getting-started-root-ca.crt"
+# Marks the user.js block this script owns, so uninstall reverts exactly what install
+# wrote and never touches a pref the user set themselves.
+$script:FirefoxPrefMarker = "// Added by OctoMesh getting-started: trust the OS root store (local root CA)."
+$script:FirefoxPref = 'user_pref("security.enterprise_roots.enabled", true);'
 
 function Get-CaFingerprint([string]$CrtPath) {
     if (-not (Test-Path $CrtPath)) { return $null }
@@ -147,18 +151,38 @@ function Get-NssDatabasePaths {
 function Set-FirefoxEnterpriseRoots {
     # Windows/macOS Firefox can import the OS root store; enable it per profile via
     # user.js (written once, kept idempotent) so the OS trust step covers Firefox too.
-    $pref = 'user_pref("security.enterprise_roots.enabled", true);'
     $touched = 0
-    foreach ($profile in (Get-FirefoxProfilePaths)) {
-        $userJs = Join-Path $profile "user.js"
+    foreach ($profilePath in (Get-FirefoxProfilePaths)) {
+        $userJs = Join-Path $profilePath "user.js"
         $existing = if (Test-Path $userJs) { Get-Content $userJs -Raw } else { "" }
         if ($existing -match [regex]::Escape('security.enterprise_roots.enabled')) { continue }
         $prefix = if ([string]::IsNullOrWhiteSpace($existing) -or $existing.EndsWith("`n")) { "" } else { "`n" }
-        Add-Content -Path $userJs -Value ("$prefix// Added by OctoMesh getting-started: trust the OS root store (local root CA).`n$pref") -Encoding UTF8
+        Add-Content -Path $userJs -Value "$prefix$script:FirefoxPrefMarker`n$script:FirefoxPref" -Encoding UTF8
         $touched++
     }
     if ($touched -gt 0) {
         Write-Host "  Firefox: enabled OS root store import in $touched profile(s)." -ForegroundColor Green
+    }
+}
+
+function Remove-FirefoxEnterpriseRoots {
+    # Reverts Set-FirefoxEnterpriseRoots, but only where our marker comment is present:
+    # a profile that had the pref before we ran (or set it by hand) is left alone.
+    $touched = 0
+    foreach ($profilePath in (Get-FirefoxProfilePaths)) {
+        $userJs = Join-Path $profilePath "user.js"
+        if (-not (Test-Path $userJs)) { continue }
+        $existing = Get-Content $userJs -Raw
+        if ($existing -notmatch [regex]::Escape($script:FirefoxPrefMarker)) { continue }
+        $block = "$([regex]::Escape($script:FirefoxPrefMarker))\s*\r?\n\s*$([regex]::Escape($script:FirefoxPref))\r?\n?"
+        $updated = ($existing -replace $block, "")
+        if ($updated -eq $existing) { continue }
+        if ([string]::IsNullOrWhiteSpace($updated)) { Remove-Item $userJs -Force }
+        else { Set-Content -Path $userJs -Value $updated.TrimEnd() -Encoding UTF8 }
+        $touched++
+    }
+    if ($touched -gt 0) {
+        Write-Host "  Firefox: reverted the OS root store import in $touched profile(s)." -ForegroundColor Green
     }
 }
 
@@ -199,10 +223,14 @@ function Add-CaToNssStores([string]$CrtPath, [switch]$NonInteractive) {
 
 function Remove-CaFromNssStores([switch]$NonInteractive) {
     $dbs = Get-NssDatabasePaths
-    if ($dbs.Count -eq 0) { return }
+    $firefoxProfiles = Get-FirefoxProfilePaths
+    if ($dbs.Count -eq 0 -and $firefoxProfiles.Count -eq 0) { return }
     $certutil = Get-NssCertutil
-    if (-not $certutil) { return }
+    if (-not $certutil -and $firefoxProfiles.Count -eq 0) { return }
     if (-not (Assert-BrowsersClosed -NonInteractive:$NonInteractive)) { return }
+
+    if ($IsWindows -or $IsMacOS) { Remove-FirefoxEnterpriseRoots }
+    if (-not $certutil) { return }
     foreach ($db in $dbs) {
         & $certutil -D -d "sql:$db" -n $script:CaNickname 2>$null | Out-Null
     }
@@ -259,8 +287,14 @@ function Add-CaToOsStore([string]$CrtPath) {
 function Remove-CaFromOsStore {
     $failed = $false
     if ($IsMacOS) {
-        sudo security delete-certificate -c $script:CaNickname /Library/Keychains/System.keychain 2>$null
-        if ($LASTEXITCODE -ne 0) { $failed = $true }
+        # security delete-certificate also exits non-zero when there is nothing to
+        # delete, so check for the certificate first - an already clean keychain is a
+        # success, not a failure.
+        security find-certificate -c $script:CaNickname /Library/Keychains/System.keychain 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            sudo security delete-certificate -c $script:CaNickname /Library/Keychains/System.keychain 2>$null
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+        }
     }
     elseif ($IsWindows) {
         try {
