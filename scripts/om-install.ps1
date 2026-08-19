@@ -443,7 +443,6 @@ New-KindCluster
 Install-Infrastructure
 Install-IngressAndCertManager
 Set-CoreDnsRewrite
-Add-CaTrust
 
 function New-SigningKey {
     $pfxPath = Join-Path $GeneratedPath "IdentityServer4Auth.pfx"
@@ -613,6 +612,11 @@ function Install-Operator {
 Install-OctoMesh
 Install-Reporting
 Install-Operator
+
+# Deliberately the LAST step: it is the only interactive part after the configuration
+# prompts and it asks to close Chrome/Firefox, so it runs when nothing long follows -
+# the browsers can be reopened immediately, right when the URLs below become useful.
+Add-CaTrust
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green

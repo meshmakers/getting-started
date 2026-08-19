@@ -71,6 +71,7 @@ function Assert-BrowsersClosed([switch]$NonInteractive) {
         Write-Host "and re-run ./om-install.ps1 to trust the CA in Chrome and Firefox." -ForegroundColor Yellow
         return $false
     }
+    Write-Host "They can be reopened as soon as the certificate is installed (a few seconds)." -ForegroundColor Yellow
     $confirm = Read-Host "Type 'yes' to close them now"
     if ($confirm -ne "yes") {
         Write-Host "Skipping the browser trust stores - Chrome and Firefox will warn about the certificate." -ForegroundColor Yellow
