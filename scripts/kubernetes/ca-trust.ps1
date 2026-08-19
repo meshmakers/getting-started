@@ -11,6 +11,10 @@
 # Chrome/Firefox first (see Assert-BrowsersClosed).
 
 $script:CaNickname = "OctoMesh Getting Started Root CA"
+# Executable names of the browsers that keep their own certificate stores.
+# chrome_crashpad_handler is deliberately absent: it holds no NSS database and exits
+# with its browser.
+$script:BrowserProcessPattern = '^(google-)?chrom(e|ium)(-browser|-stable|-beta|-dev)?$|^firefox(-bin|-esr|-developer-edition)?$|^Google Chrome( Beta| Canary| Dev)?$|^Firefox( Developer Edition| Nightly)?$'
 $script:LinuxCaFileName = "octomesh-getting-started-root-ca.crt"
 
 function Get-CaFingerprint([string]$CrtPath) {
@@ -32,10 +36,34 @@ function Test-RootCaUsable([string]$CrtPath, [string]$KeyPath) {
     return ($certPub.Trim() -eq $keyPub.Trim()) -and $certPub.Trim().Length -gt 0
 }
 
+function Get-BrowserProcessBaseName([string]$ProcessName) {
+    # Normalizes what Get-Process reports on the three platforms to a bare executable
+    # name:
+    #   Linux   "chrome --type=renderer …", "/opt/google/chrome/chrome --type=zygote"
+    #   Windows "chrome", "chrome.exe", or a full path containing spaces
+    #   macOS   "Google Chrome", "firefox"
+    # Command-line flags are cut off first (everything from the first " -"), then the
+    # path is reduced to its last segment - so names that legitimately contain a space
+    # survive.
+    if ([string]::IsNullOrWhiteSpace($ProcessName)) { return "" }
+    $name = ($ProcessName.Trim() -split ' +-', 2)[0].Trim()
+    $name = ($name -split '[/\\]')[-1]
+    return ($name -replace '\.exe$', '')
+}
+
+function Test-BrowserProcessName([string]$ProcessName) {
+    if ([string]::IsNullOrWhiteSpace($ProcessName)) { return $false }
+    # Match the reported name as-is first (covers "Google Chrome" and "chrome.exe"),
+    # then the normalized form (covers Linux command lines and full paths).
+    if (($ProcessName.Trim() -replace '\.exe$', '') -match $script:BrowserProcessPattern) { return $true }
+    return ((Get-BrowserProcessBaseName $ProcessName) -match $script:BrowserProcessPattern)
+}
+
 function Get-RunningBrowserProcesses {
-    # Process names differ per platform; match on the base name only.
-    $names = @("chrome", "chromium", "chromium-browser", "google-chrome", "firefox", "firefox-bin", "Google Chrome", "Firefox")
-    return @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $names -contains $_.ProcessName })
+    # Works on all three platforms: Linux (process name is the rewritten command
+    # line), Windows (chrome/firefox[.exe]) and macOS ("Google Chrome", "firefox").
+    return @(Get-Process -ErrorAction SilentlyContinue |
+        Where-Object { Test-BrowserProcessName $_.ProcessName })
 }
 
 function Assert-BrowsersClosed([switch]$NonInteractive) {
@@ -46,7 +74,7 @@ function Assert-BrowsersClosed([switch]$NonInteractive) {
     $running = Get-RunningBrowserProcesses
     if ($running.Count -eq 0) { return $true }
 
-    $list = ($running | Select-Object -ExpandProperty ProcessName -Unique | Sort-Object) -join ", "
+    $list = ($running | ForEach-Object { Get-BrowserProcessBaseName $_.ProcessName } | Sort-Object -Unique) -join ", "
     Write-Host ""
     Write-Host "Chrome/Firefox are running ($list). Their certificate databases can only be" -ForegroundColor Yellow
     Write-Host "updated while they are closed." -ForegroundColor Yellow
@@ -63,13 +91,19 @@ function Assert-BrowsersClosed([switch]$NonInteractive) {
     foreach ($p in $running) {
         try { Stop-Process -Id $p.Id -Force -ErrorAction Stop } catch { }
     }
-    Start-Sleep -Seconds 2
-    $still = Get-RunningBrowserProcesses
-    if ($still.Count -gt 0) {
-        Write-Host "Some browser processes are still running - close them manually and re-run." -ForegroundColor Yellow
-        return $false
+    # A browser is a process tree (Chrome: zygotes, renderers, utility processes);
+    # children can outlive the parent by a moment, so poll instead of sleeping once.
+    $deadline = (Get-Date).AddSeconds(15)
+    while ((Get-Date) -lt $deadline) {
+        $still = Get-RunningBrowserProcesses
+        if ($still.Count -eq 0) { return $true }
+        foreach ($p in $still) {
+            try { Stop-Process -Id $p.Id -Force -ErrorAction Stop } catch { }
+        }
+        Start-Sleep -Milliseconds 500
     }
-    return $true
+    Write-Host "Some browser processes are still running - close them manually and re-run." -ForegroundColor Yellow
+    return $false
 }
 
 function Get-NssCertutil {
