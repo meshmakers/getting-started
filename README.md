@@ -38,10 +38,10 @@ The installer:
 2. installs MongoDB, RabbitMQ, and CrateDB,
 3. installs ingress-nginx and cert-manager with a local root CA and trusts it for
    the OS, Chrome and Firefox (you will be asked for sudo/admin rights; skip with
-   `-SkipTrustCa`). The CA is persisted in `scripts/kubernetes/.ca/` and reused by
-   later installs, so the trust you grant once keeps working after a reinstall.
-   Chrome and Firefox only re-read their certificate stores on start, so the
-   installer asks to close them when they are running,
+   `-SkipTrustCa`). The CA private key never leaves the cluster, so every install
+   creates a fresh CA and re-trusts it — expect the sudo/admin prompt on each
+   install, and note that Chrome and Firefox only re-read their certificate stores
+   on start, so the installer asks to close them when they are running,
 4. installs the OctoMesh platform and the Communication Operator from the public
    Helm chart repository (release versions only — you pick the version, latest is
    the default). Companion chart versions (mesh adapter, simulation, reporting)
@@ -108,12 +108,13 @@ the Communication Operator — exactly the way managed OctoMesh environments wor
 * **Browser warns about the certificate** — the root CA trust step was skipped or
   failed. Close Chrome/Firefox and re-run `./om-install.ps1` without `-SkipTrustCa`
   (it is safe to re-run on a live installation), or trust
-  `scripts/kubernetes/.ca/local-root-ca.crt` manually. On Linux, Chrome and Firefox
+  `scripts/kubernetes/.generated/local-root-ca.crt` manually. On Linux, Chrome and Firefox
   keep their own certificate stores — the installer needs NSS `certutil`
   (`sudo apt install libnss3-tools`) to write to them.
-* **Certificates untrusted again after reinstalling** — only happens when the CA was
-  purged (`./om-uninstall.ps1 -PurgeCa`) or `scripts/kubernetes/.ca/` was deleted;
-  the next install then mints a new CA and re-trusts it.
+* **Certificates untrusted again after reinstalling** — each install mints a new root
+  CA (its private key is never stored outside the cluster, on purpose), so the trust
+  step has to run again. Close Chrome/Firefox during the install and let the
+  sudo/admin prompt through; `./om-install.ps1` replaces the stale CA in every store.
 * **After a cluster cold start, API calls fail with `401`** — services that boot
   while Identity is not yet reachable cache a broken OIDC metadata state and then
   reject valid tokens until their pods are restarted (the state does not self-heal).

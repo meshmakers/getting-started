@@ -24,18 +24,6 @@ function Get-CaFingerprint([string]$CrtPath) {
     return (($out -join "") -replace '.*=', '').Trim().ToUpperInvariant()
 }
 
-function Test-RootCaUsable([string]$CrtPath, [string]$KeyPath) {
-    # Reusable only when both halves are present, the cert still has a month of life
-    # left, and the key actually belongs to the cert.
-    if (-not (Test-Path $CrtPath) -or -not (Test-Path $KeyPath)) { return $false }
-    openssl x509 -in $CrtPath -noout -checkend 2592000 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { return $false }
-    $certPub = openssl x509 -in $CrtPath -noout -pubkey 2>$null | Out-String
-    $keyPub = openssl pkey -in $KeyPath -pubout 2>$null | Out-String
-    if ($LASTEXITCODE -ne 0) { return $false }
-    return ($certPub.Trim() -eq $keyPub.Trim()) -and $certPub.Trim().Length -gt 0
-}
-
 function Get-BrowserProcessBaseName([string]$ProcessName) {
     # Normalizes what Get-Process reports on the three platforms to a bare executable
     # name:

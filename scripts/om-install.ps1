@@ -27,11 +27,10 @@ $BaseDomain = "127-0-0-1.nip.io"
 $KubernetesPath = Join-Path $PSScriptRoot "kubernetes"
 $GeneratedPath = Join-Path $KubernetesPath ".generated"
 $ConfigPath = Join-Path $KubernetesPath "local-config.json"
-# The root CA lives OUTSIDE .generated so that om-uninstall keeps it: a fresh CA per
-# install would invalidate the trust already established in the OS and browser stores.
-$CaPath = Join-Path $KubernetesPath ".ca"
-$RootCaCrtPath = Join-Path $CaPath "local-root-ca.crt"
-$RootCaKeyPath = Join-Path $CaPath "local-root-ca.key"
+# Only the PUBLIC half of the root CA ever leaves the cluster; the private key stays
+# in the cert-manager secret and dies with the cluster, so every install mints a fresh
+# CA and re-trusts it in the OS and browser stores.
+$RootCaCrtPath = Join-Path $GeneratedPath "local-root-ca.crt"
 $IngressNginxVersion = "4.15.1"
 $CertManagerVersion = "v1.20.2"
 . (Join-Path $KubernetesPath "ca-trust.ps1")
@@ -374,46 +373,20 @@ function Install-IngressAndCertManager {
         --kube-context $KubeContext --wait --timeout 5m
     if ($LASTEXITCODE -ne 0) { throw "cert-manager install failed." }
 
-    New-Item -ItemType Directory -Force -Path $CaPath | Out-Null
-    if (Test-RootCaUsable $RootCaCrtPath $RootCaKeyPath) {
-        # Reuse the CA from a previous install: seed the secret before creating the
-        # issuer and skip the bootstrap Certificate entirely, so cert-manager never
-        # mints a new CA and the host/browser trust stays valid.
-        Write-Host "Reusing the persisted root CA from $RootCaCrtPath" -ForegroundColor Cyan
-        # Drop a bootstrap Certificate left over from an earlier install in this same
-        # cluster - otherwise cert-manager would re-own and overwrite the secret.
-        kubectl --context $KubeContext -n cert-manager delete certificate local-root-ca --ignore-not-found | Out-Null
-        $secretYaml = kubectl --context $KubeContext -n cert-manager create secret tls local-root-ca-tls `
-            --cert=$RootCaCrtPath --key=$RootCaKeyPath --dry-run=client -o yaml
-        if ($LASTEXITCODE -ne 0) { throw "Building the local-root-ca-tls secret from the persisted CA failed." }
-        $secretYaml | kubectl --context $KubeContext apply -f -
-        if ($LASTEXITCODE -ne 0) { throw "Applying the local-root-ca-tls secret failed." }
-    }
-    else {
-        Write-Host "Bootstrapping a new local root CA..." -ForegroundColor Cyan
-        kubectl --context $KubeContext apply -f (Join-Path $KubernetesPath "root-ca-bootstrap.yaml")
-        if ($LASTEXITCODE -ne 0) { throw "kubectl apply of root-ca-bootstrap.yaml failed." }
-        kubectl --context $KubeContext -n cert-manager wait --for=condition=Ready certificate/local-root-ca --timeout=120s
-        if ($LASTEXITCODE -ne 0) { throw "Certificate local-root-ca did not become Ready within 120s." }
-    }
-
     kubectl --context $KubeContext apply -f (Join-Path $KubernetesPath "cluster-issuer.yaml")
     if ($LASTEXITCODE -ne 0) { throw "kubectl apply of cluster-issuer.yaml failed." }
     kubectl --context $KubeContext wait --for=condition=Ready clusterissuer/mm-cloud-issuer --timeout=120s
     if ($LASTEXITCODE -ne 0) { throw "ClusterIssuer mm-cloud-issuer did not become Ready within 120s - check 'kubectl --context kind-octomesh describe clusterissuer mm-cloud-issuer'." }
 
-    # Persist BOTH halves of the CA (cert + key) for the next install, and keep a copy
-    # in .generated for the chart --set-file rootCa values.
+    # Export the root CA certificate for OS/browser trust and for the chart rootCa
+    # values. The private key is deliberately NOT extracted: a root CA trusted by the
+    # OS and by the browsers can sign for ANY host, so it must not be lying around on
+    # disk beyond the lifetime of the cluster that uses it.
     $caB64 = kubectl --context $KubeContext -n cert-manager get secret local-root-ca-tls -o jsonpath='{.data.ca\.crt}'
     if (-not $caB64) { $caB64 = kubectl --context $KubeContext -n cert-manager get secret local-root-ca-tls -o jsonpath='{.data.tls\.crt}' }
     if ([string]::IsNullOrWhiteSpace($caB64)) { throw "Could not read the root CA from secret local-root-ca-tls - is cert-manager healthy?" }
-    $keyB64 = kubectl --context $KubeContext -n cert-manager get secret local-root-ca-tls -o jsonpath='{.data.tls\.key}'
-    if ([string]::IsNullOrWhiteSpace($keyB64)) { throw "Could not read the root CA private key from secret local-root-ca-tls." }
     [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($caB64)) | Set-Content -Path $RootCaCrtPath -NoNewline -Encoding ascii
-    [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($keyB64)) | Set-Content -Path $RootCaKeyPath -NoNewline -Encoding ascii
-    if (-not $IsWindows) { chmod 600 $RootCaKeyPath }
-    Copy-Item -Path $RootCaCrtPath -Destination (Join-Path $GeneratedPath "local-root-ca.crt") -Force
-    Write-Host "Root CA persisted in $RootCaCrtPath"
+    Write-Host "Root CA exported to $RootCaCrtPath"
 }
 
 function Set-CoreDnsRewrite {
@@ -450,6 +423,8 @@ function Add-CaTrust {
     }
     Write-Host "Trusting the local root CA (may prompt for sudo/elevation)..." -ForegroundColor Cyan
     try {
+        # Replaces any CA left over from a previous install - they share the CN, and a
+        # stale one would only add trust nothing can use.
         Add-CaToOsStore $RootCaCrtPath
     }
     catch {
@@ -505,7 +480,7 @@ function Install-OctoMesh {
     if ($LASTEXITCODE -ne 0) { throw "octo-mesh-crds install failed." }
 
     $pfxPath = New-SigningKey
-    $caPath = Join-Path $GeneratedPath "local-root-ca.crt"
+    $caPath = $RootCaCrtPath
 
     # Forward slashes in --set-file paths (helm on Windows chokes on backslashes) -
     # see Install-Operator's comment for details.
@@ -566,7 +541,7 @@ function Install-OctoMesh {
 function Install-Reporting {
     if ($DeploymentProfile -ne "full") { return }
     Write-Host "Installing reporting chart (octo-mesh-reporting $($config.reportingChartVersion))..." -ForegroundColor Cyan
-    $caPath = Join-Path $GeneratedPath "local-root-ca.crt"
+    $caPath = $RootCaCrtPath
     # Forward slashes in --set-file paths (helm on Windows chokes on backslashes) -
     # see Install-Operator's comment for details.
     $caArg = $caPath -replace '\\', '/'
@@ -620,7 +595,7 @@ function Install-Operator {
     $caCrtArg = $caCrt -replace '\\', '/'
     $svcKeyArg = $svcKey -replace '\\', '/'
     $svcCrtArg = $svcCrt -replace '\\', '/'
-    $rootCaArg = (Join-Path $GeneratedPath "local-root-ca.crt") -replace '\\', '/'
+    $rootCaArg = $RootCaCrtPath -replace '\\', '/'
     $operatorValues = Join-Path $KubernetesPath "values/operator-values.yaml"
     helm upgrade --install communication-operator octo-mesh-communication-operator `
         --repo $ChartRepo --version $config.chartVersion `
