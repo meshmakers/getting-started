@@ -81,11 +81,15 @@ function Assert-BrowsersClosed([switch]$NonInteractive) {
         Write-Host "Skipping the affected store(s) - that browser will warn about the certificate." -ForegroundColor Yellow
         return $false
     }
-    foreach ($p in $running) {
+    return (Stop-BrowserProcesses)
+}
+
+function Stop-BrowserProcesses {
+    # A browser is a process tree (Chrome: zygotes, renderers, utility processes);
+    # children can outlive the parent, so poll and re-kill instead of sleeping once.
+    foreach ($p in (Get-RunningBrowserProcesses)) {
         try { Stop-Process -Id $p.Id -Force -ErrorAction Stop } catch { }
     }
-    # A browser is a process tree (Chrome: zygotes, renderers, utility processes);
-    # children can outlive the parent by a moment, so poll instead of sleeping once.
     $deadline = (Get-Date).AddSeconds(15)
     while ((Get-Date) -lt $deadline) {
         $still = Get-RunningBrowserProcesses
@@ -95,8 +99,33 @@ function Assert-BrowsersClosed([switch]$NonInteractive) {
         }
         Start-Sleep -Milliseconds 500
     }
-    Write-Host "Some browser processes are still running - close them manually and re-run." -ForegroundColor Yellow
+    Write-Host "  Some browser processes are still running - close them manually." -ForegroundColor Yellow
     return $false
+}
+
+function Invoke-BrowserRestartOffer([switch]$NonInteractive) {
+    # The certificate is already installed at this point; a browser only has to restart
+    # to read it. Offering to close it here is pure convenience - declining costs
+    # nothing, so this is deliberately separate from the locked-database fallback.
+    $running = Get-RunningBrowserProcesses
+    if ($running.Count -eq 0) { return }
+
+    $list = ($running | ForEach-Object { Get-BrowserProcessBaseName $_.ProcessName } | Sort-Object -Unique) -join ", "
+    Write-Host ""
+    Write-Host "Chrome/Firefox are running ($list) and need a restart to pick up the new" -ForegroundColor Cyan
+    Write-Host "certificate. The certificate itself is already installed." -ForegroundColor Cyan
+    if ($NonInteractive) {
+        Write-Host "Restart them when convenient." -ForegroundColor Cyan
+        return
+    }
+    $confirm = Read-Host "Type 'yes' to close them now, or press Enter to restart them yourself later"
+    if ($confirm -ne "yes") {
+        Write-Host "Left running - restart Chrome/Firefox when convenient." -ForegroundColor Cyan
+        return
+    }
+    if (Stop-BrowserProcesses) {
+        Write-Host "  Closed - reopen Chrome/Firefox whenever you like." -ForegroundColor Green
+    }
 }
 
 function Get-NssCertutil {
@@ -237,9 +266,6 @@ function Add-CaToNssStores([string]$CrtPath, [switch]$NonInteractive) {
         Write-Host "  Could not write to NSS store $db (non-fatal) - close that browser and re-run ./om-install.ps1." -ForegroundColor Yellow
     }
 
-    if ((Get-RunningBrowserProcesses).Count -gt 0) {
-        Write-Host "  Restart Chrome/Firefox for the new certificate to take effect." -ForegroundColor Cyan
-    }
 }
 
 function Test-CaInNssStore([string]$Certutil, [string]$Db) {

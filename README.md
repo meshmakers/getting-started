@@ -41,9 +41,9 @@ The installer:
    `-SkipTrustCa`). The CA private key never leaves the cluster, so every install
    creates a fresh CA and re-trusts it — expect the sudo/admin prompt on each
    install. Running browsers are not in the way: the certificate is installed even
-   while Chrome and Firefox are open, you just have to restart them afterwards to
-   pick it up. Only if a browser has its certificate database locked does the
-   installer offer to close it for you,
+   while Chrome and Firefox are open — they only need a restart to pick it up, and the
+   installer offers to close them for you at the end (declining is fine, restart them
+   whenever you like),
 4. installs the OctoMesh platform and the Communication Operator from the public
    Helm chart repository (release versions only — you pick the version, latest is
    the default). Companion chart versions (mesh adapter, simulation, reporting)

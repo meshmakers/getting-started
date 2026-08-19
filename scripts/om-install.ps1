@@ -433,6 +433,10 @@ function Add-CaTrust {
     }
     # Chrome on Linux and Firefox everywhere need more than the OS store.
     Add-CaToNssStores $RootCaCrtPath -NonInteractive:$NonInteractive
+    # Every store is written by now; a running browser only has to restart to read it.
+    # Offer to close them as a convenience - on every platform, since the OS store and
+    # the Firefox pref need a restart just as much as the NSS databases do.
+    Invoke-BrowserRestartOffer -NonInteractive:$NonInteractive
 }
 
 # ── Main flow ────────────────────────────────────────────────────────────────

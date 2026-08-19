@@ -47,10 +47,11 @@ All commands run from `scripts/` with PowerShell 7.4+.
   profile's `user.js` on Windows/macOS. The sqlite `cert9.db` backend accepts writes
   from a running browser (verified against a live headless Firefox), so the write is
   always attempted first and the browser only has to be restarted to pick the CA up.
-  Closing browsers is a fallback for a locked database: the scripts then detect
-  running Chrome/Firefox (matching a normalized executable name — on Linux
-  `ProcessName` is Chrome's whole command line) and ask for a `yes` before
-  terminating them.
+  Browsers are closed in two cases only, both `yes`-confirmed: as a fallback when a
+  database rejects the write, and as a convenience offer at the end of `Add-CaTrust`
+  (`Invoke-BrowserRestartOffer`) — at that point everything is already installed, so
+  declining costs nothing. Process matching uses a normalized executable name, since
+  on Linux `ProcessName` is Chrome's whole command line.
 * Hostnames: `https://{identity,assets,bots,communication,platform,studio,reporting}.127-0-0-1.nip.io`.
   A CoreDNS rewrite resolves `*.127-0-0-1.nip.io` to ingress-nginx inside the cluster
   (pods fetch JWKS from the public identity URI — without the rewrite they would
