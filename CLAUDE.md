@@ -43,6 +43,12 @@ All commands run from `scripts/` with PowerShell 7.4+.
   a root CA trusted by the OS and browsers can sign for any host, so it must not
   outlive the cluster on disk. Consequence: every install mints a new CA and re-trusts
   it (sudo/admin prompt each time), replacing the stale entry.
+* On Windows both scripts call `Assert-Elevated` before doing any work: the certificate
+  store needs an elevated process, PowerShell cannot elevate in place, so the script
+  re-launches itself with `-Verb RunAs`, waits, and exits with the child's code. Bound
+  parameters are rebuilt for the child except `*LicenseKey`, which would otherwise land
+  in a machine-visible command line. Skipped with `-SkipTrustCa` / `-KeepCaTrust`, and
+  a no-op on Unix (per-command `sudo` there).
 * Trust plumbing lives in `kubernetes/ca-trust.ps1`, shared by install/uninstall:
   the OS store on all three platforms, plus — on Linux only — NSS via `certutil` for
   Chrome (`~/.pki/nssdb`) and for every Firefox profile (deb/tarball, snap, flatpak),

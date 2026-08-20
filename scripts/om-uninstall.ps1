@@ -14,6 +14,12 @@ $KubernetesPath = Join-Path $PSScriptRoot "kubernetes"
 $GeneratedPath = Join-Path $KubernetesPath ".generated"
 
 . (Join-Path $KubernetesPath "ca-trust.ps1")
+$script:ElevationParameters = $PSBoundParameters
+
+# The CA has to come out of the Windows certificate store, which needs elevation -
+# ask before deleting the cluster, so a declined UAC prompt does not leave the CA
+# trusted with no cluster behind it.
+if (-not $KeepCaTrust) { Assert-Elevated }
 
 if (-not $Force) {
     Write-Host "This deletes the kind cluster '$ClusterName' including ALL DATA (MongoDB, CrateDB volumes)." -ForegroundColor Yellow

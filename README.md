@@ -38,7 +38,10 @@ The installer:
 2. installs MongoDB, RabbitMQ, and CrateDB,
 3. installs ingress-nginx and cert-manager with a local root CA and trusts it for
    the OS, Chrome and Firefox (you will be asked for sudo/admin rights; skip with
-   `-SkipTrustCa`). The CA private key never leaves the cluster, so every install
+   `-SkipTrustCa`). On Windows the script re-launches itself through UAC at the very
+   start, because the certificate store cannot be written from a non-elevated process;
+   on Linux/macOS it asks for `sudo` when it gets to that step. The CA private key
+   never leaves the cluster, so every install
    creates a fresh CA and re-trusts it — expect the sudo/admin prompt on each
    install. Running browsers are not in the way: the certificate is installed even
    while Chrome and Firefox are open — they only need a restart to pick it up, and the

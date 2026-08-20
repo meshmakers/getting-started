@@ -11,6 +11,45 @@
 #   * Firefox on Windows/macOS - needs nothing: it imports the OS root store by
 #                          default (security.enterprise_roots.enabled, on since FF 68).
 
+function Assert-Elevated {
+    # Writing to Cert:\LocalMachine\Root (and removing from it) requires an elevated
+    # process on Windows, and PowerShell cannot elevate in place - so re-launch the
+    # calling script through UAC and let this one exit. Unix relies on per-command sudo.
+    if (-not $IsWindows) { return }
+
+    $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+    if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { return }
+
+    $script = $MyInvocation.PSCommandPath
+    if (-not $script) { $script = $PSCommandPath }
+    Write-Host "Administrator rights are required to update the Windows certificate store." -ForegroundColor Yellow
+    Write-Host "Re-launching $([System.IO.Path]::GetFileName($script)) elevated - accept the UAC prompt." -ForegroundColor Yellow
+
+    # Rebuild the original invocation: switches as bare names, everything else quoted.
+    # License keys are deliberately NOT forwarded - a command line is visible to every
+    # process on the machine. The elevated run picks them up from local-config.json, or
+    # asks for them.
+    $argList = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$script`"")
+    foreach ($entry in $script:ElevationParameters.GetEnumerator()) {
+        if ($entry.Key -like "*LicenseKey") { continue }
+        if ($entry.Value -is [switch]) {
+            if ($entry.Value.IsPresent) { $argList += "-$($entry.Key)" }
+        }
+        else {
+            $argList += "-$($entry.Key)"
+            $argList += "`"$($entry.Value)`""
+        }
+    }
+
+    try {
+        $process = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList $argList -Verb RunAs -PassThru -Wait
+        exit $process.ExitCode
+    }
+    catch {
+        throw "Elevation was declined or failed. Start an elevated PowerShell and run the script there."
+    }
+}
+
 $script:CaNickname = "OctoMesh Getting Started Root CA"
 # Executable names of the browsers that keep their own certificate stores.
 # chrome_crashpad_handler is deliberately absent: it holds no NSS database and exits

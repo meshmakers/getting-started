@@ -37,6 +37,8 @@ $RootCaCrtPath = Join-Path $GeneratedPath "local-root-ca.crt"
 $IngressNginxVersion = "4.15.1"
 $CertManagerVersion = "v1.20.2"
 . (Join-Path $KubernetesPath "ca-trust.ps1")
+# Consumed by Assert-Elevated when it has to re-launch this script through UAC.
+$script:ElevationParameters = $PSBoundParameters
 
 function Test-Prerequisites {
     Write-Host ""
@@ -443,6 +445,10 @@ function Add-CaTrust {
 }
 
 # ── Main flow ────────────────────────────────────────────────────────────────
+# Ask for elevation up front rather than after the cluster is up: on Windows the
+# certificate store cannot be written from a non-elevated process, and re-launching
+# mid-install would repeat the work already done.
+if (-not $SkipTrustCa) { Assert-Elevated }
 if (-not (Test-Prerequisites)) { exit 1 }
 if (-not (Test-PortsFree)) { exit 1 }
 $config = Initialize-Configuration
