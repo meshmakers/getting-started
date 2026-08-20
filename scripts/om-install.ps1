@@ -27,9 +27,6 @@ $BaseDomain = "127-0-0-1.nip.io"
 $KubernetesPath = Join-Path $PSScriptRoot "kubernetes"
 $GeneratedPath = Join-Path $KubernetesPath ".generated"
 $ConfigPath = Join-Path $KubernetesPath "local-config.json"
-# Only the PUBLIC half of the root CA ever leaves the cluster; the private key stays
-# in the cert-manager secret and dies with the cluster, so every install mints a fresh
-# CA and re-trusts it in the OS and browser stores.
 $RootCaCrtPath = Join-Path $GeneratedPath "local-root-ca.crt"
 $IngressNginxVersion = "4.15.1"
 $CertManagerVersion = "v1.20.2"
@@ -379,9 +376,7 @@ function Install-IngressAndCertManager {
     if ($LASTEXITCODE -ne 0) { throw "ClusterIssuer mm-cloud-issuer did not become Ready within 120s - check 'kubectl --context kind-octomesh describe clusterissuer mm-cloud-issuer'." }
 
     # Export the root CA certificate for OS/browser trust and for the chart rootCa
-    # values. The private key is deliberately NOT extracted: a root CA trusted by the
-    # OS and by the browsers can sign for ANY host, so it must not be lying around on
-    # disk beyond the lifetime of the cluster that uses it.
+    # values.
     $caB64 = kubectl --context $KubeContext -n cert-manager get secret local-root-ca-tls -o jsonpath='{.data.ca\.crt}'
     if (-not $caB64) { $caB64 = kubectl --context $KubeContext -n cert-manager get secret local-root-ca-tls -o jsonpath='{.data.tls\.crt}' }
     if ([string]::IsNullOrWhiteSpace($caB64)) { throw "Could not read the root CA from secret local-root-ca-tls - is cert-manager healthy?" }
