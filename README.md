@@ -27,6 +27,14 @@ and the installer sets up a locally-trusted certificate authority.
 
 ## Install
 
+> **Windows: run these scripts from an elevated PowerShell** ("Run as administrator").
+> Trusting the local root CA writes to the machine certificate store, which a normal
+> process cannot do, so `om-install.ps1` and `om-uninstall.ps1` stop right away with a
+> message when the console is not elevated. They do not try to elevate themselves.
+> On Linux and macOS a normal console is fine — the scripts ask for `sudo` at the step
+> that needs it. `-SkipTrustCa` (install) and `-KeepCaTrust` (uninstall) skip the
+> certificate work and therefore the elevation check as well.
+
 ```pwsh
 cd scripts
 ./om-install.ps1                          # core profile
@@ -36,17 +44,17 @@ cd scripts
 The installer:
 1. creates a kind cluster named `octomesh` (all ports bound to 127.0.0.1 only),
 2. installs MongoDB, RabbitMQ, and CrateDB,
-3. installs ingress-nginx and cert-manager with a local root CA and trusts it for
-   the OS, Chrome and Firefox (you will be asked for sudo/admin rights; skip with
-   `-SkipTrustCa`). On Windows the script re-launches itself through UAC at the very
-   start, because the certificate store cannot be written from a non-elevated process;
-   on Linux/macOS it asks for `sudo` when it gets to that step. The CA private key
-   never leaves the cluster, so every install
-   creates a fresh CA and re-trusts it — expect the sudo/admin prompt on each
-   install. Running browsers are not in the way: the certificate is installed even
-   while Chrome and Firefox are open — they only need a restart to pick it up, and the
-   installer offers to close them for you at the end (declining is fine, restart them
-   whenever you like),
+3. installs ingress-nginx and cert-manager with a local root CA and trusts it — skip
+   with `-SkipTrustCa`. Where the certificate goes depends on the platform: the OS
+   trust store everywhere (which is what Chrome and Firefox read on Windows and macOS),
+   plus, on Linux, each browser's own store — `~/.pki/nssdb` for Chrome/Chromium and
+   every Firefox profile — because Linux browsers ignore the OS store. On Linux this
+   needs NSS `certutil` (Debian/Ubuntu: `sudo apt install libnss3-tools`); without it
+   the installer says so and leaves the browsers untrusted. The CA private key never
+   leaves the cluster, so every install creates a fresh CA and trusts it again.
+   **Afterwards you have to close Chrome and Firefox completely and start them again** —
+   browsers read certificate stores only when they start, and the installer prints a
+   warning saying so instead of closing anything for you,
 4. installs the OctoMesh platform and the Communication Operator from the public
    Helm chart repository (release versions only — you pick the version, latest is
    the default). Companion chart versions (mesh adapter, simulation, reporting)
@@ -110,18 +118,24 @@ the Communication Operator — exactly the way managed OctoMesh environments wor
   `docker login` with a free Docker account before installing.
 * **Ports already in use** — the installer refuses when 80/443/27017/5672/15672/5432/4301
   are taken (e.g. by another local database). Stop the conflicting service first.
-* **Browser warns about the certificate** — first restart the browser: trust stores
-  are read at startup. If it still warns, the trust step was skipped or failed — re-run
-  `./om-install.ps1` without `-SkipTrustCa` (safe on a live installation) or trust
-  `scripts/kubernetes/.generated/local-root-ca.crt` manually. On Linux, Chrome and
-  Firefox ignore the OS store and keep their own, so the installer needs NSS `certutil`
-  (`sudo apt install libnss3-tools`) to reach them. On Windows/macOS, Firefox reads the
-  OS store only while `security.enterprise_roots.enabled` is `true` (the default since
-  Firefox 68) — check it in `about:config` if your Firefox was configured otherwise.
+* **Browser warns about the certificate** — restart the browser first; certificate
+  stores are read only at startup. Closing every window is not always enough: an
+  installed web app, or Chrome's "continue running background apps" setting, keeps the
+  process alive with the old store loaded (`pgrep -af chrome`, or Task Manager, tells
+  you). If it still warns after a real restart, the trust step was skipped or failed —
+  re-run `./om-install.ps1` (elevated on Windows, without `-SkipTrustCa`; safe on a
+  live installation), or trust `scripts/kubernetes/.generated/local-root-ca.crt`
+  manually. On Linux that means NSS `certutil` (`sudo apt install libnss3-tools`) must
+  be installed. On Windows/macOS, Firefox reads the OS store only while
+  `security.enterprise_roots.enabled` is `true` (the default since Firefox 68) — check
+  it in `about:config` if your Firefox was configured otherwise.
+* **`Administrator rights are required …` on Windows** — the script stopped before doing
+  anything. Close it, start PowerShell as Administrator, and run it again; or pass
+  `-SkipTrustCa` / `-KeepCaTrust` to run without touching the certificate store.
 * **Certificates untrusted again after reinstalling** — each install mints a new root
   CA (its private key is never stored outside the cluster, on purpose), so the trust
-  step runs again and replaces the stale entry in every store. Just restart the browser
-  afterwards.
+  step runs again and replaces the stale entry in every store. Restart the browser
+  afterwards, as after a first install.
 * **After a cluster cold start, API calls fail with `401`** — services that boot
   while Identity is not yet reachable cache a broken OIDC metadata state and then
   reject valid tokens until their pods are restarted (the state does not self-heal).

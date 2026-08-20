@@ -43,24 +43,21 @@ All commands run from `scripts/` with PowerShell 7.4+.
   a root CA trusted by the OS and browsers can sign for any host, so it must not
   outlive the cluster on disk. Consequence: every install mints a new CA and re-trusts
   it (sudo/admin prompt each time), replacing the stale entry.
-* On Windows both scripts call `Assert-Elevated` before doing any work: the certificate
-  store needs an elevated process, PowerShell cannot elevate in place, so the script
-  re-launches itself with `-Verb RunAs`, waits, and exits with the child's code. Bound
-  parameters are rebuilt for the child except `*LicenseKey`, which would otherwise land
-  in a machine-visible command line. Skipped with `-SkipTrustCa` / `-KeepCaTrust`, and
-  a no-op on Unix (per-command `sudo` there).
-* Trust plumbing lives in `kubernetes/ca-trust.ps1`, shared by install/uninstall:
-  the OS store on all three platforms, plus — on Linux only — NSS via `certutil` for
-  Chrome (`~/.pki/nssdb`) and for every Firefox profile (deb/tarball, snap, flatpak),
-  because Linux browsers ignore the OS store. On Windows/macOS nothing browser-specific
-  is done: Chrome uses the OS store and Firefox imports it by default
-  (`security.enterprise_roots.enabled`, on since FF 68). The sqlite `cert9.db` backend
-  accepts writes from a running browser (verified against a live headless Firefox), so
-  nothing is closed to install the CA — the browser just has to restart to read it.
-  `Add-CaTrust` ends with `Invoke-BrowserRestartOffer`, a `yes`-confirmed convenience
-  that closes running browsers; declining costs nothing. Process matching uses a
-  normalized executable name, since on Linux `ProcessName` is Chrome's whole command
-  line.
+* Host trust lives in `kubernetes/ca-trust.ps1` (161 lines), dot-sourced by both
+  scripts: `Assert-Elevated`, `Get-NssCertutil`, `Get-NssDatabasePaths`, the
+  `Add-`/`Remove-CaToOsStore` and `…BrowserStores` pairs, and
+  `Write-BrowserRestartWarning`. `Assert-Elevated` only *checks* on Windows — no
+  elevated relaunch — and exits 1 with instructions when the console is not elevated;
+  it is skipped by `-SkipTrustCa` / `-KeepCaTrust` and is a no-op on Unix, where
+  individual commands use `sudo`.
+* Stores written: the OS store on all three platforms, plus — on Linux only — NSS via
+  `certutil` for Chrome (`~/.pki/nssdb`) and every Firefox profile (deb/tarball, snap,
+  flatpak), because Linux browsers ignore the OS store. On Windows/macOS nothing
+  browser-specific happens: Chrome uses the OS store and Firefox imports it by default
+  (`security.enterprise_roots.enabled`, on since FF 68).
+* Browser processes are never inspected or stopped. Both scripts end the certificate
+  step with a warning that Chrome/Firefox must be closed completely and restarted
+  before they see (or stop seeing) the CA.
 * Hostnames: `https://{identity,assets,bots,communication,platform,studio,reporting}.127-0-0-1.nip.io`.
   A CoreDNS rewrite resolves `*.127-0-0-1.nip.io` to ingress-nginx inside the cluster
   (pods fetch JWKS from the public identity URI — without the rewrite they would

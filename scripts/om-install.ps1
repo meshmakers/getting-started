@@ -37,8 +37,6 @@ $RootCaCrtPath = Join-Path $GeneratedPath "local-root-ca.crt"
 $IngressNginxVersion = "4.15.1"
 $CertManagerVersion = "v1.20.2"
 . (Join-Path $KubernetesPath "ca-trust.ps1")
-# Consumed by Assert-Elevated when it has to re-launch this script through UAC.
-$script:ElevationParameters = $PSBoundParameters
 
 function Test-Prerequisites {
     Write-Host ""
@@ -426,28 +424,21 @@ function Add-CaTrust {
         Write-Host "Skipping trust of the root CA (-SkipTrustCa). Browsers will warn about the certificate." -ForegroundColor Yellow
         return
     }
-    Write-Host "Trusting the local root CA (may prompt for sudo/elevation)..." -ForegroundColor Cyan
+    Write-Host "Trusting the local root CA (may prompt for sudo)..." -ForegroundColor Cyan
     try {
-        # Replaces any CA left over from a previous install - they share the CN, and a
-        # stale one would only add trust nothing can use.
         Add-CaToOsStore $RootCaCrtPath
     }
     catch {
         Write-Host "  OS trust failed (non-fatal): $($_.Exception.Message)." -ForegroundColor Yellow
         Write-Host "  You can trust $RootCaCrtPath manually or re-run ./om-install.ps1 later." -ForegroundColor Yellow
     }
-    # Chrome on Linux and Firefox everywhere need more than the OS store.
-    Add-CaToNssStores $RootCaCrtPath
-    # Every store is written by now; a running browser only has to restart to read it.
-    # Offer to close them as a convenience - on every platform, since the OS store and
-    # the Firefox pref need a restart just as much as the NSS databases do.
-    Invoke-BrowserRestartOffer
+    Add-CaToBrowserStores $RootCaCrtPath
+    Write-BrowserRestartWarning
 }
 
 # ── Main flow ────────────────────────────────────────────────────────────────
-# Ask for elevation up front rather than after the cluster is up: on Windows the
-# certificate store cannot be written from a non-elevated process, and re-launching
-# mid-install would repeat the work already done.
+# Checked before anything is built: on Windows the certificate store needs an elevated
+# console, and finding that out after the cluster is up would waste the whole install.
 if (-not $SkipTrustCa) { Assert-Elevated }
 if (-not (Test-Prerequisites)) { exit 1 }
 if (-not (Test-PortsFree)) { exit 1 }
@@ -623,10 +614,6 @@ function Install-Operator {
 Install-OctoMesh
 Install-Reporting
 Install-Operator
-
-# Deliberately the LAST step: it is the only interactive part after the configuration
-# prompts and it asks to close Chrome/Firefox, so it runs when nothing long follows -
-# the browsers can be reopened immediately, right when the URLs below become useful.
 Add-CaTrust
 
 Write-Host ""

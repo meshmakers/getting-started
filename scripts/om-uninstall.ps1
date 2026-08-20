@@ -14,11 +14,8 @@ $KubernetesPath = Join-Path $PSScriptRoot "kubernetes"
 $GeneratedPath = Join-Path $KubernetesPath ".generated"
 
 . (Join-Path $KubernetesPath "ca-trust.ps1")
-$script:ElevationParameters = $PSBoundParameters
 
-# The CA has to come out of the Windows certificate store, which needs elevation -
-# ask before deleting the cluster, so a declined UAC prompt does not leave the CA
-# trusted with no cluster behind it.
+# ── Main flow ────────────────────────────────────────────────────────────────
 if (-not $KeepCaTrust) { Assert-Elevated }
 
 if (-not $Force) {
@@ -38,11 +35,12 @@ else {
 }
 
 if (-not $KeepCaTrust) {
-    Write-Host "Removing the root CA from the OS and browser trust stores (may prompt for sudo/elevation)..." -ForegroundColor Cyan
+    Write-Host "Removing the root CA from the OS and browser trust stores (may prompt for sudo)..." -ForegroundColor Cyan
     if (-not (Remove-CaFromOsStore)) {
         Write-Host "CA trust removal failed (non-fatal). You may need to remove the 'OctoMesh Getting Started Root CA' from your OS trust store manually." -ForegroundColor Yellow
     }
-    Remove-CaFromNssStores
+    Remove-CaFromBrowserStores
+    Write-BrowserRestartWarning -Removed
 }
 
 if (-not $KeepGeneratedFiles -and (Test-Path $GeneratedPath)) {
@@ -50,6 +48,7 @@ if (-not $KeepGeneratedFiles -and (Test-Path $GeneratedPath)) {
     Remove-Item -Recurse -Force $GeneratedPath
 }
 
+Write-Host ""
 Write-Host "Uninstall complete." -ForegroundColor Green
 Write-Host "local-config.json (version + license keys) was kept for the next install."
 if ($KeepCaTrust) {
