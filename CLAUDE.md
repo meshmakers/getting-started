@@ -14,10 +14,8 @@ only — rolling/dev tags are not publicly available.
 All commands run from `scripts/` with PowerShell 7.4+.
 
 ```pwsh
-./om-install.ps1 [-DeploymentProfile core|full] [-SkipTrustCa]
+./om-install.ps1 [-DeploymentProfile core|full] [-SkipTrustCa] [-NonInteractive]
                  [-ChartVersion X.Y.Z] [-IdentityServerLicenseKey …] [-AutoMapperLicenseKey …]
-                 # unattended runs are detected from a redirected stdin, not a flag:
-                 # version defaults to latest, missing license keys throw
 ./om-login-local.ps1 [-tenantId meshtest] [-includeReporting $true]
 ./om-bootstrap-tenant.ps1 [-TenantId meshtest] [-IncludeSimulation]
 ./om-status.ps1

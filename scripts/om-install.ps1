@@ -13,15 +13,12 @@ param(
     [Parameter()]
     [string]$IdentityServerLicenseKey,
     [Parameter()]
-    [string]$AutoMapperLicenseKey
+    [string]$AutoMapperLicenseKey,
+    [Parameter()]
+    [switch]$NonInteractive = $false
 )
 
 $ErrorActionPreference = "Stop"
-
-# Prompting is impossible when stdin is not a console (CI, piped input): Read-Host
-# blocks forever on an open pipe that carries no data. Detected instead of exposed as
-# a flag, so an automated run cannot hang by forgetting to pass one.
-$Unattended = [Console]::IsInputRedirected
 
 $ClusterName = "octomesh"
 $KubeContext = "kind-$ClusterName"
@@ -181,7 +178,7 @@ function Get-CompanionChartMismatchMessage([string]$ChartVersion, [string[]]$Mis
 }
 
 function Assert-CompanionChartVersions([string]$IndexContent, [string]$ChartVersion) {
-    # Unattended paths (-ChartVersion, or a redirected stdin): fail hard when any
+    # Non-interactive paths (-ChartVersion / -NonInteractive): fail hard when any
     # companion chart has no release at or below the selected platform version.
     # Returns the resolved @{chartName=version} map on success.
     $result = Resolve-CompanionChartVersions -IndexContent $IndexContent -PlatformChartVersion $ChartVersion
@@ -212,7 +209,7 @@ function Initialize-Configuration {
         $selected = $releases | Where-Object { $_.ChartVersion -eq $ChartVersion } | Select-Object -First 1
         if (-not $selected) { throw "Chart version '$ChartVersion' not found in $ChartRepo" }
     }
-    elseif ($config.chartVersion -and $Unattended) {
+    elseif ($config.chartVersion -and $NonInteractive) {
         $indexContent = Get-ChartIndexContent
         $selected = [pscustomobject]@{ ChartVersion = $config.chartVersion; AppVersion = $config.appVersion }
     }
@@ -220,7 +217,7 @@ function Initialize-Configuration {
         $indexContent = Get-ChartIndexContent
         $releases = Get-ChartReleases -IndexContent $indexContent -ChartName "octo-mesh"
         if ($releases.Count -eq 0) { throw "Could not fetch versions from $ChartRepo. Check your internet connection." }
-        if ($Unattended) {
+        if ($NonInteractive) {
             $selected = $releases[0]
         }
         else {
@@ -278,7 +275,7 @@ function Initialize-Configuration {
     # License keys
     if ($IdentityServerLicenseKey) { $config.identityServerLicenseKey = $IdentityServerLicenseKey }
     if (-not $config.identityServerLicenseKey) {
-        if ($Unattended) { throw "IdentityServerLicenseKey is required (parameter or local-config.json) when running unattended." }
+        if ($NonInteractive) { throw "IdentityServerLicenseKey is required (parameter or local-config.json)." }
         Write-Host ""
         Write-Host "Duende IdentityServer license key" -ForegroundColor Green
         Write-Host "Get one at https://duendesoftware.com/products/identityserver#pricing (community edition is free for small companies and open source)."
@@ -286,7 +283,7 @@ function Initialize-Configuration {
     }
     if ($AutoMapperLicenseKey) { $config.autoMapperLicenseKey = $AutoMapperLicenseKey }
     if (-not $config.autoMapperLicenseKey) {
-        if ($Unattended) { throw "AutoMapperLicenseKey is required (parameter or local-config.json) when running unattended." }
+        if ($NonInteractive) { throw "AutoMapperLicenseKey is required (parameter or local-config.json)." }
         Write-Host ""
         Write-Host "AutoMapper license key" -ForegroundColor Green
         Write-Host "Get one at https://www.automapper.io/ (free tier available)."

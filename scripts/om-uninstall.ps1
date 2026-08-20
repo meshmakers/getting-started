@@ -1,7 +1,6 @@
 #!/usr/bin/env pwsh
 # Deletes the OctoMesh kind cluster and ALL its data, and removes the trusted root CA
-# from the OS and browser stores. The CA private key never leaves the cluster, so the
-# CA dies with it - the next install creates a new one and trusts it again.
+# from the OS and browser stores.
 param(
     [switch]$Force = $false,
     [switch]$KeepCaTrust = $false,
@@ -15,7 +14,6 @@ $GeneratedPath = Join-Path $KubernetesPath ".generated"
 
 . (Join-Path $KubernetesPath "ca-trust.ps1")
 
-# ── Main flow ────────────────────────────────────────────────────────────────
 if (-not $KeepCaTrust) { Assert-Elevated }
 
 if (-not $Force) {
@@ -48,10 +46,5 @@ if (-not $KeepGeneratedFiles -and (Test-Path $GeneratedPath)) {
     Remove-Item -Recurse -Force $GeneratedPath
 }
 
-Write-Host ""
 Write-Host "Uninstall complete." -ForegroundColor Green
 Write-Host "local-config.json (version + license keys) was kept for the next install."
-if ($KeepCaTrust) {
-    Write-Host "The root CA was left in your trust stores, but its private key died with the"
-    Write-Host "cluster - the next install creates a new CA and replaces the stale entry."
-}
