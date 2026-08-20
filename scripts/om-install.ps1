@@ -27,9 +27,10 @@ $BaseDomain = "127-0-0-1.nip.io"
 $KubernetesPath = Join-Path $PSScriptRoot "kubernetes"
 $GeneratedPath = Join-Path $KubernetesPath ".generated"
 $ConfigPath = Join-Path $KubernetesPath "local-config.json"
+$RootCaCrtPath = Join-Path $GeneratedPath "local-root-ca.crt"
 $IngressNginxVersion = "4.15.1"
 $CertManagerVersion = "v1.20.2"
-$RootCaCommonName = "OctoMesh Getting Started Root CA"
+. (Join-Path $KubernetesPath "ca-trust.ps1")
 
 function Test-Prerequisites {
     Write-Host ""
@@ -374,13 +375,13 @@ function Install-IngressAndCertManager {
     kubectl --context $KubeContext wait --for=condition=Ready clusterissuer/mm-cloud-issuer --timeout=120s
     if ($LASTEXITCODE -ne 0) { throw "ClusterIssuer mm-cloud-issuer did not become Ready within 120s - check 'kubectl --context kind-octomesh describe clusterissuer mm-cloud-issuer'." }
 
-    # Export the root CA for OS trust and for chart rootCa values.
-    $caPath = Join-Path $GeneratedPath "local-root-ca.crt"
+    # Export the root CA certificate for OS/browser trust and for the chart rootCa
+    # values.
     $caB64 = kubectl --context $KubeContext -n cert-manager get secret local-root-ca-tls -o jsonpath='{.data.ca\.crt}'
     if (-not $caB64) { $caB64 = kubectl --context $KubeContext -n cert-manager get secret local-root-ca-tls -o jsonpath='{.data.tls\.crt}' }
     if ([string]::IsNullOrWhiteSpace($caB64)) { throw "Could not read the root CA from secret local-root-ca-tls - is cert-manager healthy?" }
-    [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($caB64)) | Set-Content -Path $caPath -NoNewline -Encoding ascii
-    Write-Host "Root CA exported to $caPath"
+    [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($caB64)) | Set-Content -Path $RootCaCrtPath -NoNewline -Encoding ascii
+    Write-Host "Root CA exported to $RootCaCrtPath"
 }
 
 function Set-CoreDnsRewrite {
@@ -412,37 +413,25 @@ function Set-CoreDnsRewrite {
 
 function Add-CaTrust {
     if ($SkipTrustCa) {
-        Write-Host "Skipping OS trust of the root CA (-SkipTrustCa). Browsers will warn about the certificate." -ForegroundColor Yellow
+        Write-Host "Skipping trust of the root CA (-SkipTrustCa). Browsers will warn about the certificate." -ForegroundColor Yellow
         return
     }
-    $caPath = Join-Path $GeneratedPath "local-root-ca.crt"
-    Write-Host "Trusting the local root CA in the OS store (may prompt for sudo/elevation)..." -ForegroundColor Cyan
+    Write-Host "Trusting the local root CA (may prompt for sudo)..." -ForegroundColor Cyan
     try {
-        if ($IsMacOS) {
-            sudo security delete-certificate -c $RootCaCommonName /Library/Keychains/System.keychain 2>$null
-            sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain $caPath
-            if ($LASTEXITCODE -ne 0) {
-                Write-Host "CA trust failed (non-fatal). You can trust $caPath manually or continue with browser warnings." -ForegroundColor Yellow
-            }
-        }
-        elseif ($IsWindows) {
-            Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -match [regex]::Escape($RootCaCommonName) } | Remove-Item -ErrorAction SilentlyContinue
-            Import-Certificate -FilePath $caPath -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
-        }
-        else {
-            sudo cp $caPath /usr/local/share/ca-certificates/octomesh-getting-started-root-ca.crt
-            sudo update-ca-certificates
-            if ($LASTEXITCODE -ne 0) {
-                Write-Host "CA trust failed (non-fatal). You can trust $caPath manually or continue with browser warnings." -ForegroundColor Yellow
-            }
-        }
+        Add-CaToOsStore $RootCaCrtPath
     }
     catch {
-        Write-Host "CA trust failed (non-fatal): $($_.Exception.Message). You can trust $caPath manually or re-run without -SkipTrustCa later." -ForegroundColor Yellow
+        Write-Host "  OS trust failed (non-fatal): $($_.Exception.Message)." -ForegroundColor Yellow
+        Write-Host "  You can trust $RootCaCrtPath manually or re-run ./om-install.ps1 later." -ForegroundColor Yellow
     }
+    Add-CaToBrowserStores $RootCaCrtPath
+    Write-BrowserRestartWarning
 }
 
 # ── Main flow ────────────────────────────────────────────────────────────────
+# Checked before anything is built: on Windows the certificate store needs an elevated
+# console, and finding that out after the cluster is up would waste the whole install.
+if (-not $SkipTrustCa) { Assert-Elevated }
 if (-not (Test-Prerequisites)) { exit 1 }
 if (-not (Test-PortsFree)) { exit 1 }
 $config = Initialize-Configuration
@@ -450,7 +439,6 @@ New-KindCluster
 Install-Infrastructure
 Install-IngressAndCertManager
 Set-CoreDnsRewrite
-Add-CaTrust
 
 function New-SigningKey {
     $pfxPath = Join-Path $GeneratedPath "IdentityServer4Auth.pfx"
@@ -487,12 +475,11 @@ function Install-OctoMesh {
     if ($LASTEXITCODE -ne 0) { throw "octo-mesh-crds install failed." }
 
     $pfxPath = New-SigningKey
-    $caPath = Join-Path $GeneratedPath "local-root-ca.crt"
 
     # Forward slashes in --set-file paths (helm on Windows chokes on backslashes) -
     # see Install-Operator's comment for details.
     $pfxArg = $pfxPath -replace '\\', '/'
-    $caArg = $caPath -replace '\\', '/'
+    $caArg = $RootCaCrtPath -replace '\\', '/'
 
     # Secrets via a temporary JSON values file (avoids --set escaping issues) -
     # the same pattern the managed-environment deployment uses.
@@ -548,10 +535,9 @@ function Install-OctoMesh {
 function Install-Reporting {
     if ($DeploymentProfile -ne "full") { return }
     Write-Host "Installing reporting chart (octo-mesh-reporting $($config.reportingChartVersion))..." -ForegroundColor Cyan
-    $caPath = Join-Path $GeneratedPath "local-root-ca.crt"
     # Forward slashes in --set-file paths (helm on Windows chokes on backslashes) -
     # see Install-Operator's comment for details.
-    $caArg = $caPath -replace '\\', '/'
+    $caArg = $RootCaCrtPath -replace '\\', '/'
     $secretsFile = Join-Path $GeneratedPath "reporting-secrets.json"
     @{
         secrets = @{
@@ -602,7 +588,7 @@ function Install-Operator {
     $caCrtArg = $caCrt -replace '\\', '/'
     $svcKeyArg = $svcKey -replace '\\', '/'
     $svcCrtArg = $svcCrt -replace '\\', '/'
-    $rootCaArg = (Join-Path $GeneratedPath "local-root-ca.crt") -replace '\\', '/'
+    $rootCaArg = $RootCaCrtPath -replace '\\', '/'
     $operatorValues = Join-Path $KubernetesPath "values/operator-values.yaml"
     helm upgrade --install communication-operator octo-mesh-communication-operator `
         --repo $ChartRepo --version $config.chartVersion `
@@ -620,6 +606,7 @@ function Install-Operator {
 Install-OctoMesh
 Install-Reporting
 Install-Operator
+Add-CaTrust
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green

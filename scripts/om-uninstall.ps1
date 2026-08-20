@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
-# Deletes the OctoMesh kind cluster and ALL its data, and removes the trusted root CA.
+# Deletes the OctoMesh kind cluster and ALL its data, and removes the trusted root CA
+# from the OS and browser stores.
 param(
     [switch]$Force = $false,
     [switch]$KeepCaTrust = $false,
@@ -8,8 +9,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ClusterName = "octomesh"
-$RootCaCommonName = "OctoMesh Getting Started Root CA"
-$GeneratedPath = Join-Path $PSScriptRoot "kubernetes/.generated"
+$KubernetesPath = Join-Path $PSScriptRoot "kubernetes"
+$GeneratedPath = Join-Path $KubernetesPath ".generated"
+
+. (Join-Path $KubernetesPath "ca-trust.ps1")
+
+if (-not $KeepCaTrust) { Assert-Elevated }
 
 if (-not $Force) {
     Write-Host "This deletes the kind cluster '$ClusterName' including ALL DATA (MongoDB, CrateDB volumes)." -ForegroundColor Yellow
@@ -28,31 +33,12 @@ else {
 }
 
 if (-not $KeepCaTrust) {
-    Write-Host "Removing the root CA from the OS trust store (may prompt for sudo/elevation)..." -ForegroundColor Cyan
-    $caRemovalFailed = $false
-    if ($IsMacOS) {
-        sudo security delete-certificate -c $RootCaCommonName /Library/Keychains/System.keychain 2>$null
-        if ($LASTEXITCODE -ne 0) { $caRemovalFailed = $true }
+    Write-Host "Removing the root CA from the OS and browser trust stores (may prompt for sudo)..." -ForegroundColor Cyan
+    if (-not (Remove-CaFromOsStore)) {
+        Write-Host "CA trust removal failed (non-fatal). You may need to remove the 'OctoMesh Getting Started Root CA' from your OS trust store manually." -ForegroundColor Yellow
     }
-    elseif ($IsWindows) {
-        try {
-            Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -match [regex]::Escape($RootCaCommonName) } | Remove-Item -ErrorAction Stop
-        }
-        catch {
-            $caRemovalFailed = $true
-        }
-    }
-    else {
-        sudo rm -f /usr/local/share/ca-certificates/octomesh-getting-started-root-ca.crt
-        if ($LASTEXITCODE -ne 0) { $caRemovalFailed = $true }
-        if (-not $caRemovalFailed) {
-            sudo update-ca-certificates --fresh | Out-Null
-            if ($LASTEXITCODE -ne 0) { $caRemovalFailed = $true }
-        }
-    }
-    if ($caRemovalFailed) {
-        Write-Host "CA trust removal failed (non-fatal). You may need to remove '$RootCaCommonName' from your OS trust store manually." -ForegroundColor Yellow
-    }
+    Remove-CaFromBrowserStores
+    Write-BrowserRestartWarning -Removed
 }
 
 if (-not $KeepGeneratedFiles -and (Test-Path $GeneratedPath)) {
