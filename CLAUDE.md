@@ -42,16 +42,17 @@ All commands run from `scripts/` with PowerShell 7.4+.
   outlive the cluster on disk. Consequence: every install mints a new CA and re-trusts
   it (sudo/admin prompt each time), replacing the stale entry.
 * Trust plumbing lives in `kubernetes/ca-trust.ps1`, shared by install/uninstall:
-  OS store on all platforms, plus NSS via `certutil` for Chrome (`~/.pki/nssdb`) and
-  Firefox profiles on Linux, and `security.enterprise_roots.enabled` in each Firefox
-  profile's `user.js` on Windows/macOS. The sqlite `cert9.db` backend accepts writes
-  from a running browser (verified against a live headless Firefox), so the write is
-  always attempted first and the browser only has to be restarted to pick the CA up.
-  Browsers are closed in two cases only, both `yes`-confirmed: as a fallback when a
-  database rejects the write, and as a convenience offer at the end of `Add-CaTrust`
-  (`Invoke-BrowserRestartOffer`) — at that point everything is already installed, so
-  declining costs nothing. Process matching uses a normalized executable name, since
-  on Linux `ProcessName` is Chrome's whole command line.
+  the OS store on all three platforms, plus — on Linux only — NSS via `certutil` for
+  Chrome (`~/.pki/nssdb`) and for every Firefox profile (deb/tarball, snap, flatpak),
+  because Linux browsers ignore the OS store. On Windows/macOS nothing browser-specific
+  is done: Chrome uses the OS store and Firefox imports it by default
+  (`security.enterprise_roots.enabled`, on since FF 68). The sqlite `cert9.db` backend
+  accepts writes from a running browser (verified against a live headless Firefox), so
+  nothing is closed to install the CA — the browser just has to restart to read it.
+  `Add-CaTrust` ends with `Invoke-BrowserRestartOffer`, a `yes`-confirmed convenience
+  that closes running browsers; declining costs nothing. Process matching uses a
+  normalized executable name, since on Linux `ProcessName` is Chrome's whole command
+  line.
 * Hostnames: `https://{identity,assets,bots,communication,platform,studio,reporting}.127-0-0-1.nip.io`.
   A CoreDNS rewrite resolves `*.127-0-0-1.nip.io` to ingress-nginx inside the cluster
   (pods fetch JWKS from the public identity URI — without the rewrite they would

@@ -107,17 +107,18 @@ the Communication Operator — exactly the way managed OctoMesh environments wor
   `docker login` with a free Docker account before installing.
 * **Ports already in use** — the installer refuses when 80/443/27017/5672/15672/5432/4301
   are taken (e.g. by another local database). Stop the conflicting service first.
-* **Browser warns about the certificate** — the root CA trust step was skipped or
-  failed. Close Chrome/Firefox and re-run `./om-install.ps1` without `-SkipTrustCa`
-  (it is safe to re-run on a live installation) — remember to restart the browser
-  afterwards — or trust
-  `scripts/kubernetes/.generated/local-root-ca.crt` manually. On Linux, Chrome and Firefox
-  keep their own certificate stores — the installer needs NSS `certutil`
-  (`sudo apt install libnss3-tools`) to write to them.
+* **Browser warns about the certificate** — first restart the browser: trust stores
+  are read at startup. If it still warns, the trust step was skipped or failed — re-run
+  `./om-install.ps1` without `-SkipTrustCa` (safe on a live installation) or trust
+  `scripts/kubernetes/.generated/local-root-ca.crt` manually. On Linux, Chrome and
+  Firefox ignore the OS store and keep their own, so the installer needs NSS `certutil`
+  (`sudo apt install libnss3-tools`) to reach them. On Windows/macOS, Firefox reads the
+  OS store only while `security.enterprise_roots.enabled` is `true` (the default since
+  Firefox 68) — check it in `about:config` if your Firefox was configured otherwise.
 * **Certificates untrusted again after reinstalling** — each install mints a new root
   CA (its private key is never stored outside the cluster, on purpose), so the trust
-  step has to run again. Close Chrome/Firefox during the install and let the
-  sudo/admin prompt through; `./om-install.ps1` replaces the stale CA in every store.
+  step runs again and replaces the stale entry in every store. Just restart the browser
+  afterwards.
 * **After a cluster cold start, API calls fail with `401`** — services that boot
   while Identity is not yet reachable cache a broken OIDC metadata state and then
   reject valid tokens until their pods are restarted (the state does not self-heal).
