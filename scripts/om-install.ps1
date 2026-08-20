@@ -13,12 +13,15 @@ param(
     [Parameter()]
     [string]$IdentityServerLicenseKey,
     [Parameter()]
-    [string]$AutoMapperLicenseKey,
-    [Parameter()]
-    [switch]$NonInteractive = $false
+    [string]$AutoMapperLicenseKey
 )
 
 $ErrorActionPreference = "Stop"
+
+# Prompting is impossible when stdin is not a console (CI, piped input): Read-Host
+# blocks forever on an open pipe that carries no data. Detected instead of exposed as
+# a flag, so an automated run cannot hang by forgetting to pass one.
+$Unattended = [Console]::IsInputRedirected
 
 $ClusterName = "octomesh"
 $KubeContext = "kind-$ClusterName"
@@ -178,7 +181,7 @@ function Get-CompanionChartMismatchMessage([string]$ChartVersion, [string[]]$Mis
 }
 
 function Assert-CompanionChartVersions([string]$IndexContent, [string]$ChartVersion) {
-    # Non-interactive paths (-ChartVersion / -NonInteractive): fail hard when any
+    # Unattended paths (-ChartVersion, or a redirected stdin): fail hard when any
     # companion chart has no release at or below the selected platform version.
     # Returns the resolved @{chartName=version} map on success.
     $result = Resolve-CompanionChartVersions -IndexContent $IndexContent -PlatformChartVersion $ChartVersion
@@ -209,7 +212,7 @@ function Initialize-Configuration {
         $selected = $releases | Where-Object { $_.ChartVersion -eq $ChartVersion } | Select-Object -First 1
         if (-not $selected) { throw "Chart version '$ChartVersion' not found in $ChartRepo" }
     }
-    elseif ($config.chartVersion -and $NonInteractive) {
+    elseif ($config.chartVersion -and $Unattended) {
         $indexContent = Get-ChartIndexContent
         $selected = [pscustomobject]@{ ChartVersion = $config.chartVersion; AppVersion = $config.appVersion }
     }
@@ -217,7 +220,7 @@ function Initialize-Configuration {
         $indexContent = Get-ChartIndexContent
         $releases = Get-ChartReleases -IndexContent $indexContent -ChartName "octo-mesh"
         if ($releases.Count -eq 0) { throw "Could not fetch versions from $ChartRepo. Check your internet connection." }
-        if ($NonInteractive) {
+        if ($Unattended) {
             $selected = $releases[0]
         }
         else {
@@ -275,7 +278,7 @@ function Initialize-Configuration {
     # License keys
     if ($IdentityServerLicenseKey) { $config.identityServerLicenseKey = $IdentityServerLicenseKey }
     if (-not $config.identityServerLicenseKey) {
-        if ($NonInteractive) { throw "IdentityServerLicenseKey is required (parameter or local-config.json)." }
+        if ($Unattended) { throw "IdentityServerLicenseKey is required (parameter or local-config.json) when running unattended." }
         Write-Host ""
         Write-Host "Duende IdentityServer license key" -ForegroundColor Green
         Write-Host "Get one at https://duendesoftware.com/products/identityserver#pricing (community edition is free for small companies and open source)."
@@ -283,7 +286,7 @@ function Initialize-Configuration {
     }
     if ($AutoMapperLicenseKey) { $config.autoMapperLicenseKey = $AutoMapperLicenseKey }
     if (-not $config.autoMapperLicenseKey) {
-        if ($NonInteractive) { throw "AutoMapperLicenseKey is required (parameter or local-config.json)." }
+        if ($Unattended) { throw "AutoMapperLicenseKey is required (parameter or local-config.json) when running unattended." }
         Write-Host ""
         Write-Host "AutoMapper license key" -ForegroundColor Green
         Write-Host "Get one at https://www.automapper.io/ (free tier available)."
@@ -432,11 +435,11 @@ function Add-CaTrust {
         Write-Host "  You can trust $RootCaCrtPath manually or re-run ./om-install.ps1 later." -ForegroundColor Yellow
     }
     # Chrome on Linux and Firefox everywhere need more than the OS store.
-    Add-CaToNssStores $RootCaCrtPath -NonInteractive:$NonInteractive
+    Add-CaToNssStores $RootCaCrtPath
     # Every store is written by now; a running browser only has to restart to read it.
     # Offer to close them as a convenience - on every platform, since the OS store and
     # the Firefox pref need a restart just as much as the NSS databases do.
-    Invoke-BrowserRestartOffer -NonInteractive:$NonInteractive
+    Invoke-BrowserRestartOffer
 }
 
 # ── Main flow ────────────────────────────────────────────────────────────────
@@ -483,12 +486,11 @@ function Install-OctoMesh {
     if ($LASTEXITCODE -ne 0) { throw "octo-mesh-crds install failed." }
 
     $pfxPath = New-SigningKey
-    $caPath = $RootCaCrtPath
 
     # Forward slashes in --set-file paths (helm on Windows chokes on backslashes) -
     # see Install-Operator's comment for details.
     $pfxArg = $pfxPath -replace '\\', '/'
-    $caArg = $caPath -replace '\\', '/'
+    $caArg = $RootCaCrtPath -replace '\\', '/'
 
     # Secrets via a temporary JSON values file (avoids --set escaping issues) -
     # the same pattern the managed-environment deployment uses.
@@ -544,10 +546,9 @@ function Install-OctoMesh {
 function Install-Reporting {
     if ($DeploymentProfile -ne "full") { return }
     Write-Host "Installing reporting chart (octo-mesh-reporting $($config.reportingChartVersion))..." -ForegroundColor Cyan
-    $caPath = $RootCaCrtPath
     # Forward slashes in --set-file paths (helm on Windows chokes on backslashes) -
     # see Install-Operator's comment for details.
-    $caArg = $caPath -replace '\\', '/'
+    $caArg = $RootCaCrtPath -replace '\\', '/'
     $secretsFile = Join-Path $GeneratedPath "reporting-secrets.json"
     @{
         secrets = @{

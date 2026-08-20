@@ -5,8 +5,7 @@
 param(
     [switch]$Force = $false,
     [switch]$KeepCaTrust = $false,
-    [switch]$KeepGeneratedFiles = $false,
-    [switch]$NonInteractive = $false
+    [switch]$KeepGeneratedFiles = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -37,7 +36,7 @@ if (-not $KeepCaTrust) {
     if (-not (Remove-CaFromOsStore)) {
         Write-Host "CA trust removal failed (non-fatal). You may need to remove the 'OctoMesh Getting Started Root CA' from your OS trust store manually." -ForegroundColor Yellow
     }
-    Remove-CaFromNssStores -NonInteractive:$NonInteractive
+    Remove-CaFromNssStores
 }
 
 if (-not $KeepGeneratedFiles -and (Test-Path $GeneratedPath)) {

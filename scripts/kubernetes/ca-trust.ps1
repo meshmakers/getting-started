@@ -67,9 +67,11 @@ function Stop-BrowserProcesses {
     return $false
 }
 
-function Invoke-BrowserRestartOffer([switch]$NonInteractive) {
+function Invoke-BrowserRestartOffer {
     # The certificate is already installed at this point; a browser only has to restart
     # to read it, so offering to close it is pure convenience - declining costs nothing.
+    # The prompt is skipped when stdin is not a console: Read-Host would block forever
+    # on an open pipe carrying no data, which is what CI looks like.
     $running = Get-RunningBrowserProcesses
     if ($running.Count -eq 0) { return }
 
@@ -77,7 +79,7 @@ function Invoke-BrowserRestartOffer([switch]$NonInteractive) {
     Write-Host ""
     Write-Host "Chrome/Firefox are running ($list) and need a restart to pick up the new" -ForegroundColor Cyan
     Write-Host "certificate. The certificate itself is already installed." -ForegroundColor Cyan
-    if ($NonInteractive) {
+    if ([Console]::IsInputRedirected) {
         Write-Host "Restart them when convenient." -ForegroundColor Cyan
         return
     }
@@ -133,7 +135,7 @@ function Add-CaToNssStore([string]$Certutil, [string]$Db, [string]$CrtPath) {
     return ($LASTEXITCODE -eq 0)
 }
 
-function Add-CaToNssStores([string]$CrtPath, [switch]$NonInteractive) {
+function Add-CaToNssStores([string]$CrtPath) {
     # Linux only: everywhere else Chrome and Firefox both read the OS trust store
     # (Firefox imports it by default since FF 68).
     if ($IsWindows -or $IsMacOS) { return }
@@ -164,7 +166,7 @@ function Test-CaInNssStore([string]$Certutil, [string]$Db) {
     return ($LASTEXITCODE -eq 0)
 }
 
-function Remove-CaFromNssStores([switch]$NonInteractive) {
+function Remove-CaFromNssStores {
     if ($IsWindows -or $IsMacOS) { return }
     $dbs = Get-NssDatabasePaths
     if ($dbs.Count -eq 0) { return }
