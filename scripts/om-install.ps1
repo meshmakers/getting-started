@@ -502,6 +502,12 @@ function Install-OctoMesh {
     } | ConvertTo-Json -Depth 5 | Set-Content -Path $secretsFile -Encoding UTF8
 
     $studioDeploy = if ($DeploymentProfile -eq "full") { "true" } else { "false" }
+    # AB#4884: announce reporting's public URL to platform-services only when the full
+    # profile actually installs the reporting chart. Left empty on core, so the
+    # _configuration document advertises reporting as "not installed" instead of a
+    # localhost default. Must match reporting-values.yaml publicUri. Inert on chart
+    # releases that predate externalUris.reporting.
+    $reportingUri = if ($DeploymentProfile -eq "full") { "https://reporting.$BaseDomain" } else { "" }
 
     try {
         helm upgrade --install octo-mesh octo-mesh `
@@ -512,6 +518,7 @@ function Install-OctoMesh {
             --set-file services.identity.signingKey.key=$pfxArg `
             --set-file secrets.rootCa=$caArg `
             --set services.studio.deploy=$studioDeploy `
+            --set externalUris.reporting=$reportingUri `
             --kube-context $KubeContext --timeout 10m
         if ($LASTEXITCODE -ne 0) { throw "octo-mesh install failed." }
     }
