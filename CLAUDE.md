@@ -15,7 +15,7 @@ All commands run from `scripts/` with PowerShell 7.4+.
 
 ```pwsh
 ./om-install.ps1 [-DeploymentProfile core|full] [-SkipTrustCa] [-NonInteractive]
-                 [-ChartVersion X.Y.Z] [-IdentityServerLicenseKey …] [-AutoMapperLicenseKey …]
+                 [-ChartVersion X.Y.Z]
 ./om-login-local.ps1 [-tenantId meshtest] [-includeReporting $true]
 ./om-bootstrap-tenant.ps1 [-TenantId meshtest] [-IncludeSimulation]
 ./om-status.ps1

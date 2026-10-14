@@ -17,9 +17,6 @@ in Docker) cluster — the same deployment model OctoMesh uses in real clusters.
 * octo-cli (`choco install octo-cli` on Windows; download the self-contained binary for
   macOS/Linux from the [Download Center](https://meshdownload.z6.web.core.windows.net/?tool=octo-cli)) —
   **minimum version 3.4.51**
-* License keys (both prompted during installation):
-  * [Duende IdentityServer](https://duendesoftware.com/products/identityserver#pricing) — community edition is free for small companies and open source
-  * [AutoMapper](https://www.automapper.io/) — free tier available
 
 No hosts-file entry and no manual certificate import are needed: services are
 reached at `*.127-0-0-1.nip.io` hostnames (public DNS that resolves to 127.0.0.1)

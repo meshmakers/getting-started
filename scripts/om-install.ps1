@@ -11,10 +11,6 @@ param(
     [Parameter()]
     [string]$ChartVersion,
     [Parameter()]
-    [string]$IdentityServerLicenseKey,
-    [Parameter()]
-    [string]$AutoMapperLicenseKey,
-    [Parameter()]
     [switch]$NonInteractive = $false
 )
 
@@ -185,17 +181,14 @@ function Assert-CompanionChartVersions([string]$IndexContent, [string]$ChartVers
     return $result.Resolved
 }
 
-function Read-MaskedInput([string]$prompt) {
-    Write-Host -NoNewline $prompt
-    $secure = Read-Host -AsSecureString
-    return [System.Net.NetworkCredential]::new("", $secure).Password
-}
-
 function Initialize-Configuration {
     $config = @{}
     if (Test-Path $ConfigPath) {
         $existing = Get-Content $ConfigPath -Raw | ConvertFrom-Json
         $existing.PSObject.Properties | ForEach-Object { $config[$_.Name] = $_.Value }
+        foreach ($retiredKey in @("identityServerLicenseKey", "autoMapperLicenseKey")) {
+            $config.Remove($retiredKey)
+        }
         Write-Host "Loaded existing configuration from local-config.json" -ForegroundColor Yellow
     }
 
@@ -268,24 +261,6 @@ function Initialize-Configuration {
     }
     Write-Host "Selected OctoMesh $($config.appVersion) (chart $($config.chartVersion))" -ForegroundColor Green
     Write-Host "Companion charts: adapter $($config.adapterChartVersion), simulation $($config.simulationChartVersion), reporting $($config.reportingChartVersion)" -ForegroundColor Green
-
-    # License keys
-    if ($IdentityServerLicenseKey) { $config.identityServerLicenseKey = $IdentityServerLicenseKey }
-    if (-not $config.identityServerLicenseKey) {
-        if ($NonInteractive) { throw "IdentityServerLicenseKey is required (parameter or local-config.json)." }
-        Write-Host ""
-        Write-Host "Duende IdentityServer license key" -ForegroundColor Green
-        Write-Host "Get one at https://duendesoftware.com/products/identityserver#pricing (community edition is free for small companies and open source)."
-        $config.identityServerLicenseKey = Read-MaskedInput "Enter Identity Server license key: "
-    }
-    if ($AutoMapperLicenseKey) { $config.autoMapperLicenseKey = $AutoMapperLicenseKey }
-    if (-not $config.autoMapperLicenseKey) {
-        if ($NonInteractive) { throw "AutoMapperLicenseKey is required (parameter or local-config.json)." }
-        Write-Host ""
-        Write-Host "AutoMapper license key" -ForegroundColor Green
-        Write-Host "Get one at https://www.automapper.io/ (free tier available)."
-        $config.autoMapperLicenseKey = Read-MaskedInput "Enter AutoMapper license key: "
-    }
 
     New-Item -ItemType Directory -Path $GeneratedPath -Force | Out-Null
     $config | ConvertTo-Json | Set-Content -Path $ConfigPath -Encoding UTF8
@@ -495,8 +470,6 @@ function Install-OctoMesh {
         services = @{
             identity = @{
                 signingKey = @{ password = "Secret01" }
-                identityServerLicenseKey = $config.identityServerLicenseKey
-                autoMapperLicenseKey = $config.autoMapperLicenseKey
             }
         }
     } | ConvertTo-Json -Depth 5 | Set-Content -Path $secretsFile -Encoding UTF8
