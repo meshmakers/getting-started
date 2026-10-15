@@ -77,7 +77,7 @@ All commands run from `scripts/` with PowerShell 7.4+.
   there is no manual client-registration script anymore.
 * Generated local state (gitignored): `scripts/kubernetes/.generated/` (signing key
   PFX, root CA certificate, Mongo keyfile, operator webhook certs),
-  `scripts/kubernetes/local-config.json` (chart version + license keys).
+  `scripts/kubernetes/local-config.json` (chart version).
 
 ## Key constraints
 

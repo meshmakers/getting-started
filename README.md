@@ -95,7 +95,7 @@ the Communication Operator — exactly the way managed OctoMesh environments wor
 ./om-stop.ps1        # stop the cluster (data preserved)
 ./om-start.ps1       # start it again (waits for Identity, then restarts dependent services once)
 ./om-uninstall.ps1   # delete the cluster AND ALL DATA, untrust the CA
-                     # (keeps local-config.json with the selected version + license keys)
+                     # (keeps local-config.json with the selected version)
 ```
 
 ## Troubleshooting
