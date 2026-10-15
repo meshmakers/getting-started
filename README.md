@@ -17,10 +17,6 @@ in Docker) cluster — the same deployment model OctoMesh uses in real clusters.
 * octo-cli (`choco install octo-cli` on Windows; download the self-contained binary for
   macOS/Linux from the [Download Center](https://meshdownload.z6.web.core.windows.net/?tool=octo-cli)) —
   **minimum version 3.4.51**
-* OctoMesh **3.5.23.0 or newer**. No license key is needed from that release on, and the
-  installer no longer asks for one. Older releases still need identity license keys (Duende
-  IdentityServer before 3.4.113.0, AutoMapper before 3.5.23.0) and do not start when installed
-  with this script.
 
 No hosts-file entry and no manual certificate import are needed: services are
 reached at `*.127-0-0-1.nip.io` hostnames (public DNS that resolves to 127.0.0.1)
