@@ -68,7 +68,12 @@ function Resolve-IdentityLicenseKeys {
         if ($NonInteractive) {
             throw "OctoMesh $AppVersion needs the $($licenseKey.Product) license key: pass -$($licenseKey.ParameterName) or set $($licenseKey.ConfigKey) in local-config.json."
         }
-        $Config[$licenseKey.ConfigKey] = & $ReadKey $licenseKey
+        $typedValue = & $ReadKey $licenseKey
+        while ([string]::IsNullOrWhiteSpace($typedValue)) {
+            Write-Host "The $($licenseKey.Product) license key must not be empty." -ForegroundColor Red
+            $typedValue = & $ReadKey $licenseKey
+        }
+        $Config[$licenseKey.ConfigKey] = $typedValue
     }
 }
 

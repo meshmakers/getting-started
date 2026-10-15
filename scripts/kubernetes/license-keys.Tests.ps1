@@ -66,6 +66,17 @@ Describe "Resolve-IdentityLicenseKeys" {
         $config.autoMapperLicenseKey | Should -Be "typed-autoMapperLicenseKey"
     }
 
+    It "prompts again while the typed key is blank" {
+        $config = @{}
+        $typedAnswers = [System.Collections.Generic.Queue[string]]::new([string[]]@("", "   ", "typed-key"))
+        $readKey = { param($licenseKey) $typedAnswers.Dequeue() }
+
+        Resolve-IdentityLicenseKeys -Config $config -AppVersion "3.5.20.0" -ReadKey $readKey
+
+        $typedAnswers.Count | Should -Be 0
+        $config.autoMapperLicenseKey | Should -Be "typed-key"
+    }
+
     It "fails in non-interactive mode and names the parameter of the missing key" {
         $config = @{}
 
