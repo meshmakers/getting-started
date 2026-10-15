@@ -15,7 +15,8 @@ All commands run from `scripts/` with PowerShell 7.4+.
 
 ```pwsh
 ./om-install.ps1 [-DeploymentProfile core|full] [-SkipTrustCa] [-NonInteractive]
-                 [-ChartVersion X.Y.Z]
+                 [-ChartVersion X.Y.Z] [-IdentityServerLicenseKey …] [-AutoMapperLicenseKey …]
+                 # license keys: only read for releases < 3.4.113.0 (Duende) / < 3.5.23.0 (AutoMapper)
 ./om-login-local.ps1 [-tenantId meshtest] [-includeReporting $true]
 ./om-bootstrap-tenant.ps1 [-TenantId meshtest] [-IncludeSimulation]
 ./om-status.ps1
@@ -77,7 +78,9 @@ All commands run from `scripts/` with PowerShell 7.4+.
   there is no manual client-registration script anymore.
 * Generated local state (gitignored): `scripts/kubernetes/.generated/` (signing key
   PFX, root CA certificate, Mongo keyfile, operator webhook certs),
-  `scripts/kubernetes/local-config.json` (chart version + license keys).
+  `scripts/kubernetes/local-config.json` (chart version + the license keys the selected
+  release still needs; thresholds in `scripts/kubernetes/license-keys.ps1`, tested by
+  `license-keys.Tests.ps1` — run `Invoke-Pester scripts/kubernetes`).
 
 ## Key constraints
 

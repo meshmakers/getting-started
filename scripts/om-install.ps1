@@ -10,6 +10,11 @@ param(
     # Non-interactive overrides (prompted when omitted):
     [Parameter()]
     [string]$ChartVersion,
+    # Only read by OctoMesh releases before 3.4.113.0 / 3.5.23.0, see kubernetes/license-keys.ps1:
+    [Parameter()]
+    [string]$IdentityServerLicenseKey,
+    [Parameter()]
+    [string]$AutoMapperLicenseKey,
     [Parameter()]
     [switch]$NonInteractive = $false
 )
@@ -27,6 +32,7 @@ $RootCaCrtPath = Join-Path $GeneratedPath "local-root-ca.crt"
 $IngressNginxVersion = "4.15.1"
 $CertManagerVersion = "v1.20.2"
 . (Join-Path $KubernetesPath "ca-trust.ps1")
+. (Join-Path $KubernetesPath "license-keys.ps1")
 
 function Test-Prerequisites {
     Write-Host ""
@@ -181,14 +187,24 @@ function Assert-CompanionChartVersions([string]$IndexContent, [string]$ChartVers
     return $result.Resolved
 }
 
+function Read-MaskedInput([string]$prompt) {
+    Write-Host -NoNewline $prompt
+    $secure = Read-Host -AsSecureString
+    return [System.Net.NetworkCredential]::new("", $secure).Password
+}
+
+function Read-LicenseKey($licenseKey) {
+    Write-Host ""
+    Write-Host "$($licenseKey.Product) license key (required by OctoMesh before $($licenseKey.RequiredBelowAppVersion))" -ForegroundColor Green
+    Write-Host $licenseKey.SignUpHint
+    return Read-MaskedInput "Enter $($licenseKey.Product) license key: "
+}
+
 function Initialize-Configuration {
     $config = @{}
     if (Test-Path $ConfigPath) {
         $existing = Get-Content $ConfigPath -Raw | ConvertFrom-Json
         $existing.PSObject.Properties | ForEach-Object { $config[$_.Name] = $_.Value }
-        foreach ($retiredKey in @("identityServerLicenseKey", "autoMapperLicenseKey")) {
-            $config.Remove($retiredKey)
-        }
         Write-Host "Loaded existing configuration from local-config.json" -ForegroundColor Yellow
     }
 
@@ -261,6 +277,13 @@ function Initialize-Configuration {
     }
     Write-Host "Selected OctoMesh $($config.appVersion) (chart $($config.chartVersion))" -ForegroundColor Green
     Write-Host "Companion charts: adapter $($config.adapterChartVersion), simulation $($config.simulationChartVersion), reporting $($config.reportingChartVersion)" -ForegroundColor Green
+
+    $providedLicenseKeys = @{
+        identityServerLicenseKey = $IdentityServerLicenseKey
+        autoMapperLicenseKey     = $AutoMapperLicenseKey
+    }
+    Resolve-IdentityLicenseKeys -Config $config -AppVersion $config.appVersion -ProvidedKeys $providedLicenseKeys `
+        -NonInteractive:$NonInteractive -ReadKey ${function:Read-LicenseKey}
 
     New-Item -ItemType Directory -Path $GeneratedPath -Force | Out-Null
     $config | ConvertTo-Json | Set-Content -Path $ConfigPath -Encoding UTF8
@@ -459,6 +482,8 @@ function Install-OctoMesh {
     # Secrets via a temporary JSON values file (avoids --set escaping issues) -
     # the same pattern the managed-environment deployment uses.
     $secretsFile = Join-Path $GeneratedPath "octo-mesh-secrets.json"
+    $identitySecrets = @{ signingKey = @{ password = "Secret01" } }
+    $identitySecrets += Get-IdentityLicenseKeyValues -Config $config -AppVersion $config.appVersion
     @{
         secrets = @{
             databaseUser = "OctoUser1"
@@ -468,9 +493,7 @@ function Install-OctoMesh {
             communicationInstanceSecretKey = Get-InstanceSecretKey
         }
         services = @{
-            identity = @{
-                signingKey = @{ password = "Secret01" }
-            }
+            identity = $identitySecrets
         }
     } | ConvertTo-Json -Depth 5 | Set-Content -Path $secretsFile -Encoding UTF8
 
