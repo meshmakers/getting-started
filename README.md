@@ -16,7 +16,12 @@ in Docker) cluster — the same deployment model OctoMesh uses in real clusters.
 * openssl in PATH (`brew install openssl` / `winget install ShiningLight.OpenSSL.Dev`)
 * octo-cli (`choco install octo-cli` on Windows; download the self-contained binary for
   macOS/Linux from the [Download Center](https://meshdownload.z6.web.core.windows.net/?tool=octo-cli)) —
-  **minimum version 3.4.51**
+  **minimum version 3.5.0**
+
+No licence keys are needed: the installer asks for none and passes none to the Helm charts.
+This holds from OctoMesh **3.5.23** on (the default is the latest release). Older releases
+still read licence keys for components that were removed later and do not start without
+them, so choose 3.5.23 or newer.
 
 No hosts-file entry and no manual certificate import are needed: services are
 reached at `*.127-0-0-1.nip.io` hostnames (public DNS that resolves to 127.0.0.1)
@@ -129,6 +134,15 @@ the Communication Operator — exactly the way managed OctoMesh environments wor
   still see `401`s (e.g. after restarting the Docker VM without `om-start.ps1`),
   run the remedy manually (omit `octo-mesh-reporting` on the core profile):
   `kubectl --context kind-octomesh -n octo rollout restart deployment octo-mesh-asset-rep-services octo-mesh-bot-services octo-mesh-communication-controller-services octo-mesh-platform-services octo-mesh-reporting`
+
+## Next steps
+
+* [Tutorial 1: Getting started](https://docs.meshmakers.cloud/docs/tutorials/gettingStarted) -
+  log in, explore the tenant and the first data.
+* [Tutorial 6: Data model, reuse or design](https://docs.meshmakers.cloud/docs/tutorials/dataModel) -
+  reuse a public Construction Kit and compile, publish and import your own small model on this tenant.
+* [template-repo](https://github.com/meshmakers/template-repo) - the starting point for
+  your own application on OctoMesh.
 
 # Further reading
 
