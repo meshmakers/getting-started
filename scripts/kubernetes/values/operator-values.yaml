@@ -6,10 +6,11 @@ octo-mesh-crds:
   enabled: false
 
 operator:
-  # Central mode: the operator owns pool CRs and helm-installs adapter workloads.
-  autoManagePools: true
-  poolNamespace: octo
-  defaultPoolName: default
+  # Central mode: the operator owns deployment site CRs and helm-installs adapter workloads.
+  # autoManageDeploymentSites defaults to false; without it every deploy is silently ignored.
+  autoManageDeploymentSites: true
+  deploymentSiteNamespace: octo
+  defaultDeploymentSiteName: default
   # In-cluster route to the controller goes through the public URI: CoreDNS
   # rewrites *.127-0-0-1.nip.io to ingress-nginx, and the root CA (secrets.rootCa)
   # makes the operator trust the local certificate.
