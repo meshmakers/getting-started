@@ -61,7 +61,7 @@ All commands run from `scripts/` with PowerShell 7.4+.
   (pods fetch JWKS from the public identity URI — without the rewrite they would
   resolve 127.0.0.1 = themselves).
 * Charts installed: `octo-mesh-crds` and `octo-mesh-communication-operator`
-  (`autoManagePools=true`) in `octo-operator-system`; `octo-mesh` (and
+  (`autoManageDeploymentSites=true`) in `octo-operator-system`; `octo-mesh` (and
   `octo-mesh-reporting` on the full profile) in `octo`. `octo-mesh-crds` and
   `octo-mesh-communication-operator` ride the same chart version as `octo-mesh`
   (selected at install time from the public index). The mesh adapter, simulation,
@@ -72,7 +72,7 @@ All commands run from `scripts/` with PowerShell 7.4+.
   MeshAdapter `670000000000000000000002` (chart `octo-mesh-adapter`), and
   HelmRepositoryConfiguration `670000000000000000000004` → https://meshmakers.github.io/charts.
   `om-bootstrap-tenant.ps1` then pins the chart version, deploys the pool
-  (`octo-cli -c DeployPool`), and deploys the adapter (`octo-cli -c DeployWorkload`).
+  (`octo-cli -c DeployDeploymentSite`, called `DeployPool` before octo-cli 3.5.0), and deploys the adapter (`octo-cli -c DeployWorkload`).
   The Studio OIDC client is blueprint-seeded from `services.studio.publicUri` —
   there is no manual client-registration script anymore.
 * Generated local state (gitignored): `scripts/kubernetes/.generated/` (signing key
@@ -85,7 +85,7 @@ All commands run from `scripts/` with PowerShell 7.4+.
   release versions only. Never reference docker.mm.cloud or main-latest tags.
 * Scripts are standalone — no octo-tools checkout, no monorepo assumptions.
 * Service images are multi-arch (amd64/arm64) as of release 3.4.51; releases older
-  than 3.4.51 are amd64-only. octo-cli minimum version is 3.4.51.
+  than 3.4.51 are amd64-only. octo-cli minimum version is 3.5.0.
 * Dev-grade default credentials are intentional (quickstart), but nothing generated
   or secret may be committed.
 * All artifacts in English. Commit format: `AB#<n> <New/Fix>: <description>`.
