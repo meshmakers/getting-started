@@ -6,7 +6,13 @@ octo-mesh-crds:
   enabled: false
 
 operator:
-  # Central mode: the operator owns pool CRs and helm-installs adapter workloads.
+  # Central mode: the operator owns deployment site CRs and helm-installs adapter workloads.
+  # Charts from 3.5.13 on read the *DeploymentSite* names (autoManageDeploymentSites defaults
+  # to false, so without it every deploy is silently ignored); older charts read the *Pool*
+  # names. Both are set so every selectable release works; the chart ignores the other set.
+  autoManageDeploymentSites: true
+  deploymentSiteNamespace: octo
+  defaultDeploymentSiteName: default
   autoManagePools: true
   poolNamespace: octo
   defaultPoolName: default

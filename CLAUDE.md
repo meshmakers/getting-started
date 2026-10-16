@@ -61,7 +61,8 @@ All commands run from `scripts/` with PowerShell 7.4+.
   (pods fetch JWKS from the public identity URI — without the rewrite they would
   resolve 127.0.0.1 = themselves).
 * Charts installed: `octo-mesh-crds` and `octo-mesh-communication-operator`
-  (`autoManagePools=true`) in `octo-operator-system`; `octo-mesh` (and
+  (`autoManageDeploymentSites=true`, and `autoManagePools=true` for charts before 3.5.13) in
+  `octo-operator-system`; `octo-mesh` (and
   `octo-mesh-reporting` on the full profile) in `octo`. `octo-mesh-crds` and
   `octo-mesh-communication-operator` ride the same chart version as `octo-mesh`
   (selected at install time from the public index). The mesh adapter, simulation,
