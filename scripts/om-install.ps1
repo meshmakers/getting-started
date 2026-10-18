@@ -161,6 +161,8 @@ function Resolve-CompanionChartVersions([string]$IndexContent, [string]$Platform
     $missing = [System.Collections.Generic.List[string]]::new()
     $platformVersion = [Version]$PlatformChartVersion
     foreach ($chartName in $CompanionChartConfigKeys.Keys) {
+        # -SkipMcp must also work on platform versions older than the first MCP chart release.
+        if ($SkipMcp -and $chartName -eq "octo-mesh-mcp") { continue }
         $companion = Get-ChartReleases -IndexContent $IndexContent -ChartName $chartName |
             Where-Object { [Version]$_.ChartVersion -le $platformVersion } |
             Select-Object -First 1
@@ -261,7 +263,9 @@ function Initialize-Configuration {
     $config.chartVersion = $selected.ChartVersion
     $config.appVersion = $selected.AppVersion
     foreach ($chartName in $CompanionChartConfigKeys.Keys) {
-        $config[$CompanionChartConfigKeys[$chartName]] = $resolvedCompanions[$chartName]
+        if ($resolvedCompanions.ContainsKey($chartName)) {
+            $config[$CompanionChartConfigKeys[$chartName]] = $resolvedCompanions[$chartName]
+        }
     }
     Write-Host "Selected OctoMesh $($config.appVersion) (chart $($config.chartVersion))" -ForegroundColor Green
     Write-Host "Companion charts: adapter $($config.adapterChartVersion), simulation $($config.simulationChartVersion), reporting $($config.reportingChartVersion), mcp $($config.mcpChartVersion)" -ForegroundColor Green

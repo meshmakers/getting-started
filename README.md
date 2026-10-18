@@ -101,7 +101,6 @@ choosing your tenant (`meshtest` by default). The client has to trust the local 
 (`scripts/kubernetes/.generated/local-root-ca.crt`); `om-install.ps1` installs it into the operating system
 trust store unless you used `-SkipTrustCa`. Clients that run on Node.js can be pointed at the file with
 `NODE_EXTRA_CA_CERTS`.
-<!-- TODO(verify): client connection and OAuth sign-in against this stack, list_tenants result (AB#6796, second person) -->
 
 ## URLs
 
@@ -132,7 +131,7 @@ trust store unless you used `-SkipTrustCa`. Clients that run on Node.js can be p
 
 * **`*.127-0-0-1.nip.io` does not resolve** — some routers/corporate DNS servers
   block DNS answers that point to 127.0.0.1 (rebind protection). Fallback: add
-  `127.0.0.1 identity.127-0-0-1.nip.io assets.127-0-0-1.nip.io bots.127-0-0-1.nip.io communication.127-0-0-1.nip.io platform.127-0-0-1.nip.io studio.127-0-0-1.nip.io reporting.127-0-0-1.nip.io`
+  `127.0.0.1 identity.127-0-0-1.nip.io assets.127-0-0-1.nip.io bots.127-0-0-1.nip.io communication.127-0-0-1.nip.io platform.127-0-0-1.nip.io studio.127-0-0-1.nip.io reporting.127-0-0-1.nip.io mcp.127-0-0-1.nip.io`
   to your hosts file.
 * **Docker Hub rate limits during install** — anonymous pulls are limited; run
   `docker login` with a free Docker account before installing.
