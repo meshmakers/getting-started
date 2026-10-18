@@ -152,6 +152,7 @@ function Install-S3Store([string]$KubeContext, [string]$KubernetesPath) {
     if ($LASTEXITCODE -ne 0) { throw "The S3 store did not become ready within 300s - check 'kubectl --context $KubeContext -n octo-infra get pods'." }
 }
 
+# TODO: remove Set-BotCrateDbEndpoint and Remove-BotCrateDbEndpoint once a chart release carries services.bot.artifactStorage.s3.crateDbServiceUrl.
 function Set-BotCrateDbEndpoint([string]$KubeContext) {
     # The second endpoint of the staging location: how CrateDB reaches the store. Here bot and CrateDB sit in
     # the same cluster, so it equals the bot's own endpoint; it is set anyway so that the bot's setting is

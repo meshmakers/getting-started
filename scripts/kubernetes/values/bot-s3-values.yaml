@@ -8,6 +8,9 @@ services:
       provider: S3
       s3:
         serviceUrl: "http://seaweedfs.octo-infra:8333"
+        # Second endpoint (how CrateDB reaches the store). Older chart releases ignore this key;
+        # om-install.ps1 sets the same variable on the deployment until a release carries it.
+        crateDbServiceUrl: "http://seaweedfs.octo-infra:8333"
         region: "us-east-1"
         bucket: "octo-artifacts"
         forcePathStyle: true
