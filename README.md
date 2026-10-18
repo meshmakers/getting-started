@@ -50,7 +50,7 @@ The installer:
    store. That needs NSS `certutil` (Debian/Ubuntu: `sudo apt install libnss3-tools`).
    **Close Chrome and Firefox completely and start them again afterwards**; they read
    certificate stores only at startup,
-4. installs the OctoMesh platform and the Communication Operator from the public
+4. installs the OctoMesh platform, the MCP server (`octo-mesh-mcp`, skip with `-SkipMcp`) and the Communication Operator from the public
    Helm chart repository (release versions only — you pick the version, latest is
    the default). Companion chart versions (mesh adapter, simulation, reporting)
    are resolved automatically to the newest release compatible with the chosen
@@ -68,6 +68,11 @@ The installer:
 ./om-login-local.ps1 -includeReporting $true  # full profile
 ```
 
+The context points at the tenant you name, but **creating tenants** (`om-bootstrap-tenant.ps1`, the scripts of
+the template repository) needs a login as the administrator of the **system tenant**: when the browser asks for
+the organization, choose `OCTOSYSTEM`. A login through another tenant ("Login via OCTOSYSTEM" on its login page)
+signs you in as a cross-tenant user, and creating tenants then fails with `Forbidden`.
+
 ## Create a tenant and deploy the mesh adapter
 
 ```pwsh
@@ -79,6 +84,24 @@ This creates the tenant, enables communication (which seeds the default pool, th
 mesh adapter, and the public chart repository), and deploys the adapters through
 the Communication Operator — exactly the way managed OctoMesh environments work.
 
+## Connect an AI client to the MCP server
+
+The stack installs the OctoMesh MCP server, so an MCP-capable AI client can work with your tenant
+(see [tutorial 4](https://docs.meshmakers.cloud/docs/tutorials/aiWithMcp) and
+[tutorial 7](https://docs.meshmakers.cloud/docs/tutorials/dataModelWithAi)). The server needs no
+model key of its own; the client brings the model. It validates the token of the user you sign in
+with and offers exactly what that user may do.
+
+```pwsh
+claude mcp add --transport http octomesh https://mcp.127-0-0-1.nip.io/mcp
+```
+
+Run `/mcp` in the client, select `octomesh` and sign in in the browser with the admin user you registered,
+choosing your tenant (`meshtest` by default). The client has to trust the local root CA of the stack
+(`scripts/kubernetes/.generated/local-root-ca.crt`); `om-install.ps1` installs it into the operating system
+trust store unless you used `-SkipTrustCa`. Clients that run on Node.js can be pointed at the file with
+`NODE_EXTRA_CA_CERTS`.
+
 ## URLs
 
 | Service | URL |
@@ -87,6 +110,7 @@ the Communication Operator — exactly the way managed OctoMesh environments wor
 | GraphQL playground (system tenant) | https://assets.127-0-0-1.nip.io/tenants/octosystem/graphql/playground |
 | Bot dashboard | https://bots.127-0-0-1.nip.io/ui/jobs |
 | Platform services (configuration discovery) | https://platform.127-0-0-1.nip.io/octosystem/_configuration |
+| MCP server (Model Context Protocol) | https://mcp.127-0-0-1.nip.io/mcp |
 | Refinery Studio (full profile) | https://studio.127-0-0-1.nip.io/ |
 | Reporting (full profile) | https://reporting.127-0-0-1.nip.io/ |
 | RabbitMQ management | http://localhost:15672/ (guest/guest) |
@@ -107,7 +131,7 @@ the Communication Operator — exactly the way managed OctoMesh environments wor
 
 * **`*.127-0-0-1.nip.io` does not resolve** — some routers/corporate DNS servers
   block DNS answers that point to 127.0.0.1 (rebind protection). Fallback: add
-  `127.0.0.1 identity.127-0-0-1.nip.io assets.127-0-0-1.nip.io bots.127-0-0-1.nip.io communication.127-0-0-1.nip.io platform.127-0-0-1.nip.io studio.127-0-0-1.nip.io reporting.127-0-0-1.nip.io`
+  `127.0.0.1 identity.127-0-0-1.nip.io assets.127-0-0-1.nip.io bots.127-0-0-1.nip.io communication.127-0-0-1.nip.io platform.127-0-0-1.nip.io studio.127-0-0-1.nip.io reporting.127-0-0-1.nip.io mcp.127-0-0-1.nip.io`
   to your hosts file.
 * **Docker Hub rate limits during install** — anonymous pulls are limited; run
   `docker login` with a free Docker account before installing.
@@ -132,8 +156,8 @@ the Communication Operator — exactly the way managed OctoMesh environments wor
   `om-start.ps1` handles this automatically: after a cold start it waits for
   Identity's JWKS and then restarts the token-validating services once. If you
   still see `401`s (e.g. after restarting the Docker VM without `om-start.ps1`),
-  run the remedy manually (omit `octo-mesh-reporting` on the core profile):
-  `kubectl --context kind-octomesh -n octo rollout restart deployment octo-mesh-asset-rep-services octo-mesh-bot-services octo-mesh-communication-controller-services octo-mesh-platform-services octo-mesh-reporting`
+  run the remedy manually (omit `octo-mesh-reporting` on the core profile and `octo-mesh-mcp-mcp` with `-SkipMcp`):
+  `kubectl --context kind-octomesh -n octo rollout restart deployment octo-mesh-asset-rep-services octo-mesh-bot-services octo-mesh-communication-controller-services octo-mesh-platform-services octo-mesh-mcp-mcp octo-mesh-reporting`
 
 ## Next steps
 

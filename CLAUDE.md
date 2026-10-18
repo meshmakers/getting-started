@@ -61,11 +61,13 @@ All commands run from `scripts/` with PowerShell 7.4+.
   (pods fetch JWKS from the public identity URI — without the rewrite they would
   resolve 127.0.0.1 = themselves).
 * Charts installed: `octo-mesh-crds` and `octo-mesh-communication-operator`
-  (`autoManageDeploymentSites=true`) in `octo-operator-system`; `octo-mesh` (and
-  `octo-mesh-reporting` on the full profile) in `octo`. `octo-mesh-crds` and
+  (`autoManageDeploymentSites=true`) in `octo-operator-system`; `octo-mesh`, `octo-mesh-mcp` (MCP server, `-SkipMcp` skips it; it reads MongoDB directly, in-cluster
+  http to the services, public identity URI over the root CA; the identity seed for its clients and
+  ApiResource derives `https://mcp.127-0-0-1.nip.io` itself) and, on the full profile,
+  `octo-mesh-reporting` in `octo`. `octo-mesh-crds` and
   `octo-mesh-communication-operator` ride the same chart version as `octo-mesh`
   (selected at install time from the public index). The mesh adapter, simulation,
-  and reporting charts release independently, so each is resolved separately to
+  reporting and MCP charts release independently, so each is resolved separately to
   the newest version at or below the selected platform version.
 * `serviceDefaults.environment=production` makes `EnableCommunication` apply the
   Release blueprint variant, which seeds: Pool `670000000000000000000001`,

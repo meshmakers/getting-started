@@ -1,0 +1,27 @@
+# Static values for the published octo-mesh-mcp chart (MCP server, Model Context Protocol).
+# Secrets, the instance secret key and the root CA are passed by om-install.ps1 at install time.
+global:
+  # Identity authority the server validates tokens against. The CoreDNS rewrite makes the
+  # public name resolvable inside the cluster, the root CA (global.secrets.rootCa) makes it trusted.
+  authUri: "https://identity.127-0-0-1.nip.io"
+  clusterDependencies:
+    mongodbHost: "mongodb-0.mongodb.octo-infra.svc.cluster.local:27017"
+    rabbitMqHost: "rabbitmq.octo-infra.svc.cluster.local"
+    rabbitMqUser: "guest"
+    streamDataHost: "cratedb.octo-infra.svc.cluster.local"
+    streamDataUser: "crate"
+    streamDataEnabled: true
+
+mcp:
+  # Must equal the URL the identity seed (System.Identity.Bootstrap) derives for the MCP clients
+  # and the ApiResource: <scheme>://mcp.<domain> with the domain of services.identity.publicUri.
+  publicUri: "https://mcp.127-0-0-1.nip.io"
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: mm-cloud-issuer
+    tls: true
+  # The reporting service is only part of the full profile; an empty URL disables only its tools.
+  octoServiceUrls:
+    reporting: ""

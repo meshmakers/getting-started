@@ -11,7 +11,10 @@ param(
     [Parameter()]
     [string]$ChartVersion,
     [Parameter()]
-    [switch]$NonInteractive = $false
+    [switch]$NonInteractive = $false,
+    # The MCP server (octo-mesh-mcp) is part of every profile; this skips it, e.g. to save memory.
+    [Parameter()]
+    [switch]$SkipMcp = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -147,6 +150,7 @@ $CompanionChartConfigKeys = [ordered]@{
     "octo-mesh-adapter"    = "adapterChartVersion"
     "octo-plug-simulation" = "simulationChartVersion"
     "octo-mesh-reporting"  = "reportingChartVersion"
+    "octo-mesh-mcp"        = "mcpChartVersion"
 }
 
 function Resolve-CompanionChartVersions([string]$IndexContent, [string]$PlatformChartVersion) {
@@ -157,6 +161,8 @@ function Resolve-CompanionChartVersions([string]$IndexContent, [string]$Platform
     $missing = [System.Collections.Generic.List[string]]::new()
     $platformVersion = [Version]$PlatformChartVersion
     foreach ($chartName in $CompanionChartConfigKeys.Keys) {
+        # -SkipMcp must also work on platform versions older than the first MCP chart release.
+        if ($SkipMcp -and $chartName -eq "octo-mesh-mcp") { continue }
         $companion = Get-ChartReleases -IndexContent $IndexContent -ChartName $chartName |
             Where-Object { [Version]$_.ChartVersion -le $platformVersion } |
             Select-Object -First 1
@@ -257,10 +263,12 @@ function Initialize-Configuration {
     $config.chartVersion = $selected.ChartVersion
     $config.appVersion = $selected.AppVersion
     foreach ($chartName in $CompanionChartConfigKeys.Keys) {
-        $config[$CompanionChartConfigKeys[$chartName]] = $resolvedCompanions[$chartName]
+        if ($resolvedCompanions.ContainsKey($chartName)) {
+            $config[$CompanionChartConfigKeys[$chartName]] = $resolvedCompanions[$chartName]
+        }
     }
     Write-Host "Selected OctoMesh $($config.appVersion) (chart $($config.chartVersion))" -ForegroundColor Green
-    Write-Host "Companion charts: adapter $($config.adapterChartVersion), simulation $($config.simulationChartVersion), reporting $($config.reportingChartVersion)" -ForegroundColor Green
+    Write-Host "Companion charts: adapter $($config.adapterChartVersion), simulation $($config.simulationChartVersion), reporting $($config.reportingChartVersion), mcp $($config.mcpChartVersion)" -ForegroundColor Green
 
     New-Item -ItemType Directory -Path $GeneratedPath -Force | Out-Null
     $config | ConvertTo-Json | Set-Content -Path $ConfigPath -Encoding UTF8
@@ -512,6 +520,43 @@ function Install-OctoMesh {
     }
 }
 
+function Install-Mcp {
+    if ($SkipMcp) { return }
+    Write-Host "Installing MCP server chart (octo-mesh-mcp $($config.mcpChartVersion))..." -ForegroundColor Cyan
+    # Forward slashes in --set-file paths (helm on Windows chokes on backslashes) -
+    # see Install-Operator's comment for details.
+    $caArg = $RootCaCrtPath -replace '\\', '/'
+    # The MCP chart takes its secrets below global.secrets, not secrets.
+    $secretsFile = Join-Path $GeneratedPath "mcp-secrets.json"
+    @{
+        global = @{
+            secrets = @{
+                databaseUser = "OctoUser1"
+                databaseAdmin = "OctoAdmin1"
+                rabbitmq = "guest"
+                streamDataPassword = "OctoStream1"
+                communicationInstanceSecretKey = Get-InstanceSecretKey
+            }
+        }
+    } | ConvertTo-Json -Depth 5 | Set-Content -Path $secretsFile -Encoding UTF8
+    try {
+        helm upgrade --install octo-mesh-mcp octo-mesh-mcp `
+            --repo $ChartRepo --version $config.mcpChartVersion `
+            --namespace octo `
+            --values (Join-Path $KubernetesPath "values/mcp-values.yaml") `
+            --values $secretsFile `
+            --set-file global.secrets.rootCa=$caArg `
+            --kube-context $KubeContext --timeout 10m
+        if ($LASTEXITCODE -ne 0) { throw "octo-mesh-mcp install failed." }
+    }
+    finally {
+        Remove-Item $secretsFile -ErrorAction SilentlyContinue
+    }
+    # The MCP server warms the CK cache of every tenant before it listens (startup probe budget 10 min).
+    kubectl --context $KubeContext -n octo rollout status deployment -l app.kubernetes.io/name=octo-mesh-mcp --timeout=600s
+    if ($LASTEXITCODE -ne 0) { Write-Host "The MCP server is not Ready yet; check 'kubectl --context $KubeContext -n octo get pods'." -ForegroundColor Yellow }
+}
+
 function Install-Reporting {
     if ($DeploymentProfile -ne "full") { return }
     Write-Host "Installing reporting chart (octo-mesh-reporting $($config.reportingChartVersion))..." -ForegroundColor Cyan
@@ -584,6 +629,7 @@ function Install-Operator {
 }
 
 Install-OctoMesh
+Install-Mcp
 Install-Reporting
 Install-Operator
 Add-CaTrust
@@ -598,6 +644,7 @@ Write-Host "  Identity:            https://identity.$BaseDomain/"
 Write-Host "  Asset repository:    https://assets.$BaseDomain/tenants/octosystem/graphql/playground"
 Write-Host "  Bot dashboard:       https://bots.$BaseDomain/ui/jobs"
 Write-Host "  Platform services:   https://platform.$BaseDomain/octosystem/_configuration"
+if (-not $SkipMcp) { Write-Host "  MCP server:          https://mcp.$BaseDomain/mcp" }
 if ($DeploymentProfile -eq "full") {
     Write-Host "  Refinery Studio:     https://studio.$BaseDomain/"
     Write-Host "  Reporting:           https://reporting.$BaseDomain/"
