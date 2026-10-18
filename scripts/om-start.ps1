@@ -49,6 +49,7 @@ if ($coldStart) {
         "octo-mesh-bot-services",
         "octo-mesh-communication-controller-services",
         "octo-mesh-platform-services",
+        "octo-mesh-mcp-mcp",
         "octo-mesh-reporting"
     )
     $existing = @(kubectl --context kind-octomesh -n octo get deployments -o name 2>$null)
