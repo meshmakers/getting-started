@@ -12,6 +12,11 @@ param(
     [string]$ChartVersion,
     [Parameter()]
     [switch]$NonInteractive = $false,
+    # Leaves out the S3-compatible object store (SeaweedFS) that the archive COPY TO / COPY FROM
+    # staging area uses, and the CrateDB job log filter that belongs to it. Without it the platform
+    # starts as before and the archive part of a tenant dump uses the row path.
+    [Parameter()]
+    [switch]$SkipS3Store = $false,
     # The MCP server (octo-mesh-mcp) is part of every profile; this skips it, e.g. to save memory.
     [Parameter()]
     [switch]$SkipMcp = $false
@@ -30,6 +35,7 @@ $RootCaCrtPath = Join-Path $GeneratedPath "local-root-ca.crt"
 $IngressNginxVersion = "4.15.1"
 $CertManagerVersion = "v1.20.2"
 . (Join-Path $KubernetesPath "ca-trust.ps1")
+. (Join-Path $PSScriptRoot "om-s3-lib.ps1")
 
 function Test-Prerequisites {
     Write-Host ""
@@ -92,7 +98,9 @@ function Test-PortsFree {
     if ($existing -contains $ClusterName) { return $true }
 
     $busy = @()
-    foreach ($port in @(80, 443, 27017, 5672, 15672, 5432, 4301)) {
+    # 8333 is mapped by kind-cluster.yaml regardless of -SkipS3Store.
+    $ports = @(80, 443, 27017, 5672, 15672, 5432, 4301, 8333)
+    foreach ($port in $ports) {
         if (Test-Connection -TargetName 127.0.0.1 -TcpPort $port -TimeoutSeconds 1 -Quiet) {
             $busy += $port
         }
@@ -420,6 +428,7 @@ if (-not (Test-PortsFree)) { exit 1 }
 $config = Initialize-Configuration
 New-KindCluster
 Install-Infrastructure
+if (-not $SkipS3Store) { Install-S3Store $KubeContext $KubernetesPath }
 Install-IngressAndCertManager
 Set-CoreDnsRewrite
 
@@ -482,6 +491,10 @@ function Install-OctoMesh {
         }
     } | ConvertTo-Json -Depth 5 | Set-Content -Path $secretsFile -Encoding UTF8
 
+    # The bot keeps dumps and staging in the S3 store (see kubernetes/values/bot-s3-values.yaml).
+    $botS3Values = @()
+    if (-not $SkipS3Store) { $botS3Values = @("--values", (Join-Path $KubernetesPath "values/bot-s3-values.yaml")) }
+
     $studioDeploy = if ($DeploymentProfile -eq "full") { "true" } else { "false" }
     # AB#4884: announce reporting's public URL to platform-services only when the full
     # profile actually installs the reporting chart. Left empty on core, so the
@@ -495,6 +508,7 @@ function Install-OctoMesh {
             --repo $ChartRepo --version $config.chartVersion `
             --namespace octo `
             --values (Join-Path $KubernetesPath "values/octo-mesh-values.yaml") `
+            @botS3Values `
             --values $secretsFile `
             --set-file services.identity.signingKey.key=$pfxArg `
             --set-file secrets.rootCa=$caArg `
@@ -518,6 +532,9 @@ function Install-OctoMesh {
         Write-Host "Check './om-status.ps1' and 'kubectl --context $KubeContext -n octo describe pods' for details." -ForegroundColor Yellow
         Write-Host "(On ARM hosts with a release older than 3.4.51, this is expected - those service images are amd64-only.)" -ForegroundColor Yellow
     }
+
+    # The bot also learns how CrateDB reaches the store (second endpoint of the staging location).
+    if (-not $SkipS3Store) { Set-BotCrateDbEndpoint $KubeContext } else { Remove-BotCrateDbEndpoint $KubeContext }
 }
 
 function Install-Mcp {
@@ -655,4 +672,7 @@ Write-Host "  1. Open https://identity.$BaseDomain/ and register the admin user.
 Write-Host "  2. Run ./om-login-local.ps1 to configure and log in octo-cli."
 Write-Host "  3. Run ./om-bootstrap-tenant.ps1 to create a tenant and deploy the mesh adapter."
 Write-Host ""
+if (-not $SkipS3Store) {
+    Write-Host "  S3 store:            http://localhost:8333 (bucket octo-artifacts; in the cluster: $($S3Store.InClusterEndpoint)); checked by ./om-status.ps1"
+}
 Write-Host "Manage the installation with ./om-status.ps1, ./om-stop.ps1, ./om-start.ps1, ./om-uninstall.ps1."

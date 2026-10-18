@@ -1,0 +1,19 @@
+# The bot keeps tenant dumps, restore uploads and the copy staging of the archive dump in the
+# S3-compatible store of this cluster (infra/s3-store.yaml) instead of on its pod disk.
+# Added by om-install.ps1 unless -SkipS3Store is given. The credential is not part of any values
+# file: it is the Secret octo/octo-artifact-s3, generated at install time.
+services:
+  bot:
+    artifactStorage:
+      provider: S3
+      s3:
+        serviceUrl: "http://seaweedfs.octo-infra:8333"
+        # Second endpoint (how CrateDB reaches the store). Older chart releases ignore this key;
+        # om-install.ps1 sets the same variable on the deployment until a release carries it.
+        crateDbServiceUrl: "http://seaweedfs.octo-infra:8333"
+        region: "us-east-1"
+        bucket: "octo-artifacts"
+        forcePathStyle: true
+        existingSecret: "octo-artifact-s3"
+        accessKeyIdKey: accessKeyId
+        secretAccessKeyKey: secretAccessKey

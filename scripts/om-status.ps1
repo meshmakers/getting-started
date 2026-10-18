@@ -1,6 +1,13 @@
 #!/usr/bin/env pwsh
 # Shows the status of the OctoMesh kind installation.
+# The S3 store check writes one small probe table and object (a COPY TO) and deletes them again;
+# -SkipS3Probe keeps the whole status read-only.
+param(
+    [Parameter()]
+    [switch]$SkipS3Probe = $false
+)
 $KubeContext = "kind-octomesh"
+. (Join-Path $PSScriptRoot "om-s3-lib.ps1")
 $base = "127-0-0-1.nip.io"
 
 $node = "octomesh-control-plane"
@@ -23,11 +30,14 @@ Write-Host "=== Helm releases ===" -ForegroundColor Cyan
 helm --kube-context $KubeContext list -A
 Write-Host ""
 Write-Host "=== Host ports ===" -ForegroundColor Cyan
-foreach ($port in @(80, 443, 27017, 5672, 15672, 5432, 4301)) {
+foreach ($port in @(80, 443, 27017, 5672, 15672, 5432, 4301, 8333)) {
     $open = Test-Connection -TargetName 127.0.0.1 -TcpPort $port -TimeoutSeconds 3 -Quiet
     $label = if ($open) { "open" } else { "CLOSED" }
     Write-Host ("  127.0.0.1:{0,-6} {1}" -f $port, $label)
 }
+Write-Host ""
+Write-Host "=== S3 store ===" -ForegroundColor Cyan
+$s3Ok = Show-S3StoreStatus $KubeContext -SkipCopyProbe:$SkipS3Probe
 Write-Host ""
 Write-Host "=== URLs ===" -ForegroundColor Cyan
 Write-Host "  Identity:          https://identity.$base/"
@@ -39,3 +49,5 @@ Write-Host "  Refinery Studio:   https://studio.$base/          (full profile)"
 Write-Host "  Reporting:         https://reporting.$base/       (full profile)"
 Write-Host "  RabbitMQ mgmt:     http://localhost:15672/        (guest/guest)"
 Write-Host "  CrateDB console:   http://localhost:4301/"
+Write-Host "  S3 store:          http://localhost:8333/         (signed requests only)"
+if (-not $s3Ok) { exit 2 }
