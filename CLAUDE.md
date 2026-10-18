@@ -90,8 +90,7 @@ All commands run from `scripts/` with PowerShell 7.4+.
   Anonymous requests are refused. The bot gets the S3 provider through
   `kubernetes/values/bot-s3-values.yaml` (chart `services.bot.artifactStorage`), plus
   `OCTO_ARTIFACTSTORAGE__S3__CRATEDBSERVICEURL` (the endpoint under which CrateDB reaches the store;
-  the published chart has no value for it, so `om-install.ps1` sets it on the deployment after every
-  `helm upgrade`). **Job log filter:** CrateDB records every statement with its text in
+  `om-install.ps1` sets it on the bot deployment). **Job log filter:** CrateDB records every statement with its text in
   `sys.jobs_log`, which for a `COPY` includes the S3 key; `om-install.ps1` sets the persistent cluster
   setting `stats.jobs_log_filter = 'stmt NOT ILIKE ''copy %'''` before the store is usable. `om-status.ps1`
   checks, without printing a key: pod ready; host answers (anonymous refused, signed list works); the

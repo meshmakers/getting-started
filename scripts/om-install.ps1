@@ -95,8 +95,8 @@ function Test-PortsFree {
     if ($existing -contains $ClusterName) { return $true }
 
     $busy = @()
-    $ports = @(80, 443, 27017, 5672, 15672, 5432, 4301)
-    if (-not $SkipS3Store) { $ports += 8333 }
+    # 8333 is mapped by kind-cluster.yaml regardless of -SkipS3Store.
+    $ports = @(80, 443, 27017, 5672, 15672, 5432, 4301, 8333)
     foreach ($port in $ports) {
         if (Test-Connection -TargetName 127.0.0.1 -TcpPort $port -TimeoutSeconds 1 -Quiet) {
             $busy += $port

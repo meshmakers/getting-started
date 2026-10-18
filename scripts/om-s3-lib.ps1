@@ -143,7 +143,7 @@ function Install-S3Store([string]$KubeContext, [string]$KubernetesPath) {
     Write-Host "Installing the S3 store (SeaweedFS) and the CrateDB job log filter..." -ForegroundColor Cyan
     # The filter first: from the moment the store is usable, a COPY with the key may run.
     if (-not (Set-JobLogFilter)) {
-        Write-Host "The job log filter is not in place; do not run COPY statements with the S3 key until ./om-status.ps1 shows it active." -ForegroundColor Yellow
+        throw "The CrateDB job log filter is not active; aborting the S3 store installation so that no COPY statement with the S3 key is recorded in sys.jobs_log. Fix the cause above, or install with -SkipS3Store."
     }
     New-S3StoreSecrets $KubeContext
     kubectl --context $KubeContext apply -f (Join-Path $KubernetesPath "infra/s3-store.yaml")
@@ -161,7 +161,10 @@ function Set-BotCrateDbEndpoint([string]$KubeContext) {
     kubectl --context $KubeContext -n $S3Store.BotNamespace set env "deployment/$($S3Store.BotDeployment)" "$($S3Store.BotCrateEndpointEnv)=$($S3Store.InClusterEndpoint)" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Setting $($S3Store.BotCrateEndpointEnv) on the bot failed." }
     kubectl --context $KubeContext -n $S3Store.BotNamespace rollout status "deployment/$($S3Store.BotDeployment)" --timeout=300s | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "The bot did not become ready after setting $($S3Store.BotCrateEndpointEnv)." }
+    if ($LASTEXITCODE -ne 0) {
+        # Like the platform pod wait in om-install.ps1: a bot that is not ready (older releases) is a warning, not an abort.
+        Write-Host "The bot is not ready after setting $($S3Store.BotCrateEndpointEnv); continuing. Check 'kubectl --context $KubeContext -n $($S3Store.BotNamespace) get pods'." -ForegroundColor Yellow
+    }
 }
 
 function Remove-BotCrateDbEndpoint([string]$KubeContext) {
