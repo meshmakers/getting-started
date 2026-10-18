@@ -68,6 +68,11 @@ The installer:
 ./om-login-local.ps1 -includeReporting $true  # full profile
 ```
 
+The context points at the tenant you name, but **creating tenants** (`om-bootstrap-tenant.ps1`, the scripts of
+the template repository) needs a login as the administrator of the **system tenant**: when the browser asks for
+the organization, choose `OCTOSYSTEM`. A login through another tenant ("Login via OCTOSYSTEM" on its login page)
+signs you in as a cross-tenant user, and creating tenants then fails with `Forbidden`.
+
 ## Create a tenant and deploy the mesh adapter
 
 ```pwsh
