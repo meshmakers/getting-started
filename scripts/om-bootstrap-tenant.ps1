@@ -1,6 +1,6 @@
 #!/usr/bin/env pwsh
 # Creates a tenant, enables communication (blueprints seed the pool, the mesh
-# adapter, and the public chart repository), and deploys pool + adapters via the
+# adapter, and the public chart repository), and deploys the deployment site + adapters via the
 # Communication Operator. Run ./om-login-local.ps1 first.
 param(
     [string]$TenantId = "meshtest",
@@ -95,8 +95,8 @@ Write-Host "Pinning the mesh adapter chart version to $($config.adapterChartVers
 Invoke-OctoCli -CliArgs @("-c", "UpdateWorkloadChartVersion", "-id", $MeshAdapterRtId, "-cv", $config.adapterChartVersion) `
     -FailureHint "The blueprint-seeded mesh adapter was not found - EnableCommunication may have failed."
 
-Write-Host "Deploying the pool (operator creates the CommunicationPool resource)..." -ForegroundColor Cyan
-Invoke-OctoCli -CliArgs @("-c", "DeployPool", "-id", $PoolRtId) -FailureHint "Requires octo-cli with the DeployPool command."
+Write-Host "Deploying the deployment site (operator creates the DeploymentSite resource)..." -ForegroundColor Cyan
+Invoke-OctoCli -CliArgs @("-c", "DeployDeploymentSite", "-id", $PoolRtId) -FailureHint "Requires octo-cli 3.5.0 or newer (DeployDeploymentSite; named DeployPool before 3.5.0)."
 
 Write-Host "Deploying the mesh adapter..." -ForegroundColor Cyan
 Invoke-OctoCli -CliArgs @("-c", "DeployWorkload", "-id", $MeshAdapterRtId) -FailureHint "Check 'octo-cli -c GetAdapters' for deployment errors."
@@ -122,7 +122,7 @@ while ((Get-Date) -lt $deadline) {
     if ($adapterLines | Where-Object { $_ -match "Running" }) { break }
     Start-Sleep -Seconds 10
 }
-kubectl --context $KubeContext -n octo get communicationpool,pods
+kubectl --context $KubeContext -n octo get deploymentsites,pods
 
 Write-Host ""
 Write-Host "Tenant '$TenantId' is ready." -ForegroundColor Green

@@ -47,4 +47,4 @@ if (-not $KeepGeneratedFiles -and (Test-Path $GeneratedPath)) {
 }
 
 Write-Host "Uninstall complete." -ForegroundColor Green
-Write-Host "local-config.json (version + license keys) was kept for the next install."
+Write-Host "local-config.json (selected version) was kept for the next install."
