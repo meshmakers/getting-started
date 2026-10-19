@@ -84,6 +84,11 @@ This creates the tenant, enables communication (which seeds the default pool, th
 mesh adapter, and the public chart repository), and deploys the adapters through
 the Communication Operator — exactly the way managed OctoMesh environments work.
 
+The script can be re-run at any time: if a run stopped part-way (an error, Ctrl+C), run it again and it
+reports the steps that are already done (tenant exists, communication enabled), executes the missing ones and
+exits 0; on a fully bootstrapped tenant it changes nothing. Real errors (for example `Forbidden`) still stop it
+with a non-zero exit code.
+
 ## Connect an AI client to the MCP server
 
 The stack installs the OctoMesh MCP server, so an MCP-capable AI client can work with your tenant

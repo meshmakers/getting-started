@@ -2,6 +2,8 @@
 # Creates a tenant, enables communication (blueprints seed the pool, the mesh
 # adapter, and the public chart repository), and deploys the deployment site + adapters via the
 # Communication Operator. Run ./om-login-local.ps1 first.
+# The script is re-runnable: every step that reports "already done" is skipped,
+# so a run that stopped part-way is simply completed by running it again.
 param(
     [string]$TenantId = "meshtest",
     [switch]$IncludeSimulation = $false
@@ -29,6 +31,24 @@ function Invoke-OctoCli {
         Write-Error "octo-cli $($CliArgs -join ' ') failed. $FailureHint"
         exit 1
     }
+}
+
+# Runs a step that is allowed to be "already done" on a re-run. The output is
+# echoed as usual; when the command fails *and* the output matches
+# $AlreadyDonePattern the step counts as done and the script continues. Every
+# other failure still stops the script (non-zero exit code).
+function Invoke-OctoCliIdempotent {
+    param([string[]]$CliArgs, [string]$AlreadyDonePattern, [string]$AlreadyDoneMessage, [string]$FailureHint)
+    # Native stderr is merged into the captured output below; it must not turn into a terminating error.
+    $ErrorActionPreference = "Continue"
+    $output = (& octo-cli @CliArgs 2>&1 | ForEach-Object { $line = "$_"; Write-Host $line; $line }) -join "`n"
+    if ($LASTEXITCODE -eq 0) { return }
+    if ($output -match $AlreadyDonePattern) {
+        Write-Host $AlreadyDoneMessage -ForegroundColor Yellow
+        return
+    }
+    Write-Error "octo-cli $($CliArgs -join ' ') failed. $FailureHint"
+    exit 1
 }
 
 # All octo-cli calls run against the dedicated 'getting-started_<tenant>'
@@ -77,15 +97,18 @@ Write-Host "Creating tenant '$TenantId'..." -ForegroundColor Cyan
 # calling it, not at the tenant being created (which doesn't exist yet and
 # would otherwise 400 with "TenantId is required").
 Set-OctoCliTenant -Tid $SystemTenantId
-& octo-cli -c Create -tid $TenantId -db $TenantId
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Tenant creation failed - if it already exists, continuing is safe." -ForegroundColor Yellow
-}
+Invoke-OctoCliIdempotent -CliArgs @("-c", "Create", "-tid", $TenantId, "-db", $TenantId) `
+    -AlreadyDonePattern "is already in use" `
+    -AlreadyDoneMessage "Tenant '$TenantId' already exists - step already done." `
+    -FailureHint "If you see Forbidden, sign in as the administrator of the system tenant (OCTOSYSTEM), see README."
 # Switch back to the target tenant for all remaining tenant-scoped operations.
 Set-OctoCliTenant -Tid $TenantId
 
 Write-Host "Enabling communication (seeds pool, mesh adapter, chart repository)..." -ForegroundColor Cyan
-Invoke-OctoCli -CliArgs @("-c", "EnableCommunication") -FailureHint "Check that you are logged in (./om-login-local.ps1) and the tenant exists."
+Invoke-OctoCliIdempotent -CliArgs @("-c", "EnableCommunication") `
+    -AlreadyDonePattern "is already enabled" `
+    -AlreadyDoneMessage "Communication is already enabled for tenant '$TenantId' - step already done." `
+    -FailureHint "Check that you are logged in (./om-login-local.ps1) and the tenant exists."
 
 if (-not $config.adapterChartVersion) {
     Write-Error "local-config.json has no adapterChartVersion - re-run ./om-install.ps1 to resolve it."
