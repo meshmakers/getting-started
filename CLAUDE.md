@@ -17,7 +17,7 @@ All commands run from `scripts/` with PowerShell 7.4+.
 ./om-install.ps1 [-DeploymentProfile core|full] [-SkipTrustCa] [-NonInteractive]
                  [-ChartVersion X.Y.Z] [-SkipS3Store]
 ./om-login-local.ps1 [-tenantId meshtest] [-includeReporting $true]
-./om-bootstrap-tenant.ps1 [-TenantId meshtest] [-IncludeSimulation]
+./om-bootstrap-tenant.ps1 [-TenantId meshtest] [-IncludeSimulation]   # re-runnable (AB#6791)
 ./om-status.ps1 [-SkipS3Probe]          # pods, releases, host ports, S3 store check (see "S3 store")
 ./om-stop.ps1 / ./om-start.ps1          # stop/start the kind node container (data preserved);
                                         # om-start waits for Identity's JWKS after a cold start and
@@ -25,6 +25,10 @@ All commands run from `scripts/` with PowerShell 7.4+.
 ./om-uninstall.ps1 [-Force] [-KeepCaTrust] [-KeepGeneratedFiles]
                                         # deletes cluster + data, and untrusts the root CA
 ```
+
+Pester tests of the re-run behaviour (fake octo-cli/kubectl, no stack needed):
+`pwsh -c "Invoke-Pester ./scripts/tests"`. Steps that may be "already done" go through
+`Invoke-OctoCliIdempotent` in `om-bootstrap-tenant.ps1`; every other failure must stop the script.
 
 ## Architecture
 
