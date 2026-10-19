@@ -62,6 +62,7 @@ exit 0
 '@ | Set-Content (Join-Path $script:Bin "octo-cli")
         "#!/bin/sh`necho 'meshtest-adapter-0 1/1 Running 0 1m'" | Set-Content (Join-Path $script:Bin "kubectl")
         chmod +x (Join-Path $script:Bin "octo-cli") (Join-Path $script:Bin "kubectl")
+        if ($LASTEXITCODE -ne 0) { throw "chmod failed - the fake octo-cli/kubectl are not executable" }
     }
 
     AfterEach {
