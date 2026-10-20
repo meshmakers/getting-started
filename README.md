@@ -154,7 +154,7 @@ The snapshot goes into the cluster's own backup repository (`/data/backup` in th
 `upgrade_<timestamp>`, snapshot `pre_upgrade`) and holds the data of the version you came from. CrateDB 6 can only be reached
 from 5.10.1 or later, so a 5.9 volume is upgraded to 5.10.16 first and then to 6.x. After every step the script
 waits until CrateDB runs the new version and every table is GREEN, and it compares the row count of each
-table with the count before the upgrade; a table with fewer rows stops the upgrade.
+table with the count before the upgrade; a table with fewer rows, or a table that is gone, is reported as a warning that names it (the upgrade continues, the snapshot is the reference).
 
 If a CrateDB volume exists but its StatefulSet is gone (after `kubectl delete sts`), the script refuses to continue, because the data may be newer than the manifest: start the version that wrote the data, or pass `-AssumeFreshVolume` (`-AssumeFreshCrateDbVolume` to `om-install.ps1`) if the volume is empty. It only works on a local kind cluster (context `kind-…` with kind nodes). Differences in the row counts after a step (a service wrote or dropped data meanwhile) are reported as a warning that names the tables.
 
