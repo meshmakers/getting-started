@@ -26,6 +26,13 @@ All commands run from `scripts/` with PowerShell 7.4+.
                                         # deletes cluster + data, and untrusts the root CA
 ```
 
+CrateDB is never applied blindly (AB#7139): `om-install.ps1` calls `scripts/om-upgrade-cratedb.ps1 -Context <ctx>` instead of
+`kubectl apply` of `infra/cratedb.yaml`. It reads the running version from `sys.nodes`, equal = no-op, running newer than the
+manifest = error without applying (CrateDB cannot be downgraded), older = snapshot into `path.repo` (`/data/backup`) and
+step by step (below 5.10.1 to 6.x via 5.10.16) with rollout, version, GREEN and row-count checks after each step. The logic
+is standalone (customers run it without octo-tools); octo-tools carries the same code as `Update-OctoCrateDb`
+(`modules/Update-OctoCrateDb.psm1`), keep both in step. Tests: `pwsh -c "Invoke-Pester ./scripts/tests/om-upgrade-cratedb.Tests.ps1"`.
+
 Pester tests of the re-run behaviour (fake octo-cli/kubectl, no stack needed):
 `pwsh -c "Invoke-Pester ./scripts/tests"`. Steps that may be "already done" go through
 `Invoke-OctoCliIdempotent` in `om-bootstrap-tenant.ps1`; every other failure must stop the script.
