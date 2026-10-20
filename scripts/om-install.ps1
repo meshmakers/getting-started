@@ -23,7 +23,10 @@ param(
     # Upgrades an existing CrateDB without the snapshot that is normally taken first (see
     # om-upgrade-cratedb.ps1), e.g. when the disk is too small for it.
     [Parameter()]
-    [switch]$SkipCrateDbSnapshot = $false
+    [switch]$SkipCrateDbSnapshot = $false,
+    # A CrateDB volume without a StatefulSet is refused (its data may be newer than the manifest); this treats it as empty.
+    [Parameter()]
+    [switch]$AssumeFreshCrateDbVolume = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -324,7 +327,8 @@ function Install-Infrastructure {
     # 5.9 -> 6.x via 5.10.16) and never downgraded. A fresh install is just the apply.
     & (Join-Path $PSScriptRoot "om-upgrade-cratedb.ps1") -Context $KubeContext `
         -ManifestPath (Join-Path $KubernetesPath "infra/cratedb.yaml") `
-        -SkipSnapshot:$SkipCrateDbSnapshot -NonInteractive:$NonInteractive
+        -SkipSnapshot:$SkipCrateDbSnapshot -NonInteractive:$NonInteractive `
+        -AssumeFreshVolume:$AssumeFreshCrateDbVolume
     kubectl --context $KubeContext apply -f (Join-Path $KubernetesPath "infra/mongodb.yaml")
     if ($LASTEXITCODE -ne 0) { throw "kubectl apply of infra/mongodb.yaml failed." }
 

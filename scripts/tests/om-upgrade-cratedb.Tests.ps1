@@ -18,6 +18,8 @@ Describe "Get-CrateUpgradePlan" {
         @{ running = "5.10.1";  target = "6.4.6";   action = "Upgrade"; steps = "6.4.6" }
         @{ running = "5.10.10"; target = "6.4.6";   action = "Upgrade"; steps = "6.4.6" }
         @{ running = "5.9.10";  target = "5.10.10"; action = "Upgrade"; steps = "5.10.10" }
+        @{ running = "5.10.16"; target = "7.0.0";   action = "Unsupported"; steps = "" }
+        @{ running = "4.8.0";   target = "6.4.6";   action = "Unsupported"; steps = "" }
     ) {
         $plan = Get-CrateUpgradePlan -Running $running -Target $target
         $plan.Action | Should -Be $action
@@ -38,12 +40,17 @@ Describe "Update-OctoCrateDb" {
     BeforeEach {
         $script:applied = [System.Collections.Generic.List[string]]::new()
         $script:hasSts = $true
+        $script:hasPvc = $false
         Mock kubectl {
             $a = $args -join " "
             $global:LASTEXITCODE = 0
-            if ($a -match "config get-contexts") { return "kind-test" }
+            if ($a -match "config get-contexts") { return @("kind-test", "test-2", "kind-fake") }
+            if ($a -match "get nodes") { if ($a -match "context kind-fake") { return "k3s://x" } else { return "kind://docker/kind/kind-test-control-plane" } }
+            if ($a -match "get pvc") { if ($script:hasPvc) { return "persistentvolumeclaim/data-cratedb-0" } else { return $null } }
+            if ($a -match "rollout status") { return "partitioned roll out complete" }
             if ($a -match "get statefulset cratedb") { if ($script:hasSts) { return "statefulset.apps/cratedb" } else { return $null } }
             if ($a -match " apply -f (.+)$") {
+                "statefulset.apps/cratedb configured"
                 $script:applied.Add(([regex]::Match((Get-Content $Matches[1] -Raw), "crate:(\d+\.\d+\.\d+)").Groups[1].Value))
             }
         }
@@ -97,10 +104,63 @@ Describe "Update-OctoCrateDb" {
         Should -Invoke New-CrateUpgradeSnapshot -Times 0
     }
 
-    It "fails the step when a table lost rows" {
+    It "rejects a context that does not exist" {
+        { Update-OctoCrateDb -Context nope -ManifestPath $script:manifest } | Should -Throw "*does not exist*"
+    }
+
+    It "refuses a context that is not a kind cluster" -ForEach @("test-2", "kind-fake") {
+        $script:hasSts = $false
+        { Update-OctoCrateDb -Context $_ -ManifestPath $script:manifest } | Should -Throw "*not a local kind cluster*"
+        $script:applied.Count | Should -Be 0
+    }
+
+    It "does not apply anything when the running version cannot be read" {
+        Mock Get-CrateRunningVersion { throw "pod down" }
+        { Update-OctoCrateDb -Context kind-test -ManifestPath $script:manifest } | Should -Throw "*Cannot read the running CrateDB version*"
+        $script:applied.Count | Should -Be 0
+    }
+
+    It "refuses an existing volume without a StatefulSet" {
+        $script:hasSts = $false; $script:hasPvc = $true
+        { Update-OctoCrateDb -Context kind-test -ManifestPath $script:manifest } | Should -Throw "*data-cratedb-0*unknown version*"
+        $script:applied.Count | Should -Be 0
+    }
+
+    It "-AssumeFreshVolume installs over an existing volume without a StatefulSet" {
+        $script:hasSts = $false; $script:hasPvc = $true
+        (Update-OctoCrateDb -Context kind-test -ManifestPath $script:manifest -AssumeFreshVolume).Action | Should -Be "Install"
+    }
+
+    It "refuses an unsupported major jump without applying" {
+        $next = Join-Path $TestDrive "next.yaml"; Set-Content $next "image: crate:7.0.0"
+        Mock Get-CrateRunningVersion { "5.10.16" }
+        { Update-OctoCrateDb -Context kind-test -ManifestPath $next } | Should -Throw "*No tested upgrade path*"
+        $script:applied.Count | Should -Be 0
+    }
+
+    It "returns exactly one result object" {
+        Mock Get-CrateRunningVersion { "5.9.10" }
+        $r = @(Update-OctoCrateDb -Context kind-test -ManifestPath $script:manifest 6>$null)
+        $r.Count | Should -Be 1
+        $r[0] | Should -BeOfType [pscustomobject]
+    }
+
+    It "warns about lost rows, names the table and still finishes" {
         Mock Get-CrateRunningVersion { "5.10.10" }
         $script:calls = 0
-        Mock Get-CrateTableCounts { $script:calls++; [ordered]@{ "doc.t" = $(if ($script:calls -eq 1) { 10L } else { 7L }) } }
-        { Update-OctoCrateDb -Context kind-test -ManifestPath $script:manifest -SkipSnapshot } | Should -Throw "*lost rows*10 -> 7*"
+        Mock Get-CrateTableCounts { $script:calls++; if ($script:calls -eq 1) { [ordered]@{ "doc.t" = 10L } } else { [ordered]@{ "doc.t" = 7L } } }
+        $r = Update-OctoCrateDb -Context kind-test -ManifestPath $script:manifest -SkipSnapshot -WarningVariable w -WarningAction SilentlyContinue 6>$null
+        $r.RowCountWarnings[0] | Should -BeLike "*doc.t has fewer rows (10 -> 7)*"
+        "$w" | Should -BeLike "*step to 6.4.6 completed*"
+    }
+}
+
+Describe "Wait-CrateHealthy" {
+    It "names the tables that are not GREEN and suggests number_of_replicas = 0" {
+        Mock Start-Sleep {}
+        Mock Get-CrateRunningVersion { "6.4.6" }
+        Mock Invoke-CrateSql { [pscustomobject]@{ rows = @(, @("doc", "readings", "YELLOW")) } }
+        { Wait-CrateHealthy -Context kind-test -Namespace octo-infra -ExpectedVersion 6.4.6 -TimeoutSeconds 1 } |
+            Should -Throw "*doc.readings (YELLOW)*number_of_replicas = 0*"
     }
 }

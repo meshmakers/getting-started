@@ -34,6 +34,9 @@ asks (interactive) or aborts (-NonInteractive).
 .PARAMETER NonInteractive
 Never ask; abort where a question would be needed.
 
+.PARAMETER AssumeFreshVolume
+Treat an existing CrateDB volume without a StatefulSet as empty (otherwise refused: its data may be newer than the manifest).
+
 .EXAMPLE
 ./om-upgrade-cratedb.ps1 -Context kind-octomesh
 #>
@@ -43,7 +46,8 @@ param(
     [string]$ManifestPath = (Join-Path $PSScriptRoot "kubernetes/infra/cratedb.yaml"),
     [string]$Namespace = "octo-infra",
     [switch]$SkipSnapshot,
-    [switch]$NonInteractive
+    [switch]$NonInteractive,
+    [switch]$AssumeFreshVolume
 )
 
 $ErrorActionPreference = "Stop"
@@ -68,6 +72,7 @@ function Get-CrateUpgradePlan {
     # Pure decision: what to do when the data runs $Running and the manifest pins $Target.
     #   NoOp    - equal, nothing to upgrade
     #   Refuse  - running is newer than the target, CrateDB cannot be downgraded
+    #   Unsupported - a major jump that has not been tested (older than 5.x, or a target beyond 6.x)
     #   Upgrade - Steps lists every version to run, in order. CrateDB 6.x can only be reached from
     #             5.10.1 or later, so anything older goes through 5.10.16 first.
     param(
@@ -76,6 +81,10 @@ function Get-CrateUpgradePlan {
     )
     $r = ConvertTo-CrateVersion $Running
     $t = ConvertTo-CrateVersion $Target
+    # Only the paths that were tested: 5.x -> 5.x/6.x and 6.x -> 6.x. Extend this table, with a test, for more.
+    if ($r.Major -lt 5 -or $t.Major -gt 6) {
+        return [pscustomobject]@{ Action = 'Unsupported'; Steps = @() }
+    }
     if ($r -eq $t) { return [pscustomobject]@{ Action = 'NoOp'; Steps = @() } }
     if ($r -gt $t) { return [pscustomobject]@{ Action = 'Refuse'; Steps = @() } }
     $steps = @()
@@ -130,17 +139,23 @@ function Wait-CrateHealthy {
     param([string]$Context, [string]$Namespace, [string]$ExpectedVersion, [int]$TimeoutSeconds = 600)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $last = ''
+    $names = @()
     while ((Get-Date) -lt $deadline) {
         try {
             $v = Get-CrateRunningVersion -Context $Context -Namespace $Namespace
-            $notGreen = [long](Invoke-CrateSql -Context $Context -Namespace $Namespace -Stmt "SELECT count(*) FROM sys.health WHERE health <> 'GREEN'").rows[0][0]
-            $last = "version $v, $notGreen table(s) not GREEN"
-            if ($v -eq $ExpectedVersion -and $notGreen -eq 0) { return }
+            $bad = Invoke-CrateSql -Context $Context -Namespace $Namespace -Stmt "SELECT table_schema, table_name, health FROM sys.health WHERE health <> 'GREEN' ORDER BY 1, 2"
+            $names = @($bad.rows | ForEach-Object { "$($_[0]).$($_[1]) ($($_[2]))" })
+            $last = "version $v, $($names.Count) table(s) not GREEN"
+            if ($v -eq $ExpectedVersion -and $names.Count -eq 0) { return }
         }
         catch { $last = $_.Exception.Message }
         Start-Sleep -Seconds 5
     }
-    throw "CrateDB did not become healthy on $ExpectedVersion within $TimeoutSeconds s ($last)."
+    $hint = ''
+    if ($names.Count -gt 0) {
+        $hint = " Not GREEN: $($names -join ', '). On this single-node CrateDB a table with replicas stays YELLOW; fix it with ALTER TABLE <table> SET (number_of_replicas = 0) and run the upgrade again."
+    }
+    throw "CrateDB did not become healthy on $ExpectedVersion within $TimeoutSeconds s ($last).$hint"
 }
 
 function Test-CrateSnapshotSpace {
@@ -184,14 +199,16 @@ Replaces the plain 'kubectl apply' of cratedb.yaml. CrateDB cannot be downgraded
 directory that a newer version has opened breaks an older one - and 6.x can only be reached from
 5.10.1 or later.
 
-  * No CrateDB StatefulSet yet (fresh install): the manifest is applied, nothing else.
+  * No CrateDB StatefulSet yet (fresh install): the manifest is applied, nothing else. If the volume
+    data-cratedb-0 still exists without a StatefulSet, it is refused unless -AssumeFreshVolume is given.
   * The running version (sys.nodes) equals the version pinned by the manifest: the manifest is applied
     (the image does not change), no upgrade.
   * The running version is NEWER than the manifest: aborts with an error and does NOT apply the manifest.
   * Otherwise: checks the free disk space, takes a snapshot into the local backup repository
     (path.repo = /data/backup), then runs every step (from below 5.10.1 to 6.x: 5.10.16 first). After
     each step it waits for the rollout, the expected version and all tables GREEN, and compares the row
-    count of every table with the count before the upgrade (fewer rows = error).
+    count of every table with the count before the upgrade (a difference is a loud warning that names the
+    tables, not an abort: running services may write, delete or drop meanwhile).
 
 The kube context is a mandatory parameter; the current context is never used.
 
@@ -211,6 +228,9 @@ for it, the function asks (interactive) or aborts (-NonInteractive).
 .PARAMETER NonInteractive
 Never ask; abort where a question would be needed.
 
+.PARAMETER AssumeFreshVolume
+Treat an existing CrateDB volume without a StatefulSet as empty (otherwise refused: its data may be newer than the manifest).
+
 .EXAMPLE
 Update-OctoCrateDb -Context kind-kind -ManifestPath ./kubernetes/infra/cratedb.yaml
 #>
@@ -220,22 +240,38 @@ Update-OctoCrateDb -Context kind-kind -ManifestPath ./kubernetes/infra/cratedb.y
         [Parameter(Mandatory)] [string]$ManifestPath,
         [string]$Namespace = 'octo-infra',
         [switch]$SkipSnapshot,
-        [switch]$NonInteractive
+        [switch]$NonInteractive,
+        [switch]$AssumeFreshVolume
     )
 
     $contexts = @(& kubectl config get-contexts -o name 2>$null)
     if ($contexts -notcontains $Context) { throw "kubectl context '$Context' does not exist." }
+    # Only a local kind cluster is ever upgraded here; a breakglass or managed-cluster context is refused.
+    $providerIds = (& kubectl --context $Context get nodes -o 'jsonpath={.items[*].spec.providerID}' 2>$null | Out-String).Trim()
+    if ($Context -notlike 'kind-*' -or -not $providerIds -or ($providerIds -split '\s+' | Where-Object { $_ -notlike 'kind://*' })) {
+        throw "Context '$Context' is not a local kind cluster (its name must start with 'kind-' and its nodes must be kind nodes). Refusing to touch it."
+    }
 
     $target = Get-CrateManifestVersion -ManifestPath $ManifestPath
+    # kubectl output goes to the console only: the function returns exactly one result object.
     $apply = {
         param([string]$Path)
-        & kubectl --context $Context apply -f $Path
+        & kubectl --context $Context apply -f $Path | Out-Host
         if ($LASTEXITCODE -ne 0) { throw "kubectl apply of $Path failed." }
     }
 
     $existing = & kubectl --context $Context -n $Namespace get statefulset cratedb -o name --ignore-not-found 2>&1
     if ($LASTEXITCODE -ne 0) { throw "Could not read the CrateDB StatefulSet in context '$Context': $existing" }
     if (-not $existing) {
+        # A StatefulSet is gone but its volume survives 'kubectl delete sts': the data may be of any version,
+        # and an older manifest over newer data crash-loops. Only an explicit switch treats it as empty.
+        $pvc = & kubectl --context $Context -n $Namespace get pvc data-cratedb-0 -o name --ignore-not-found 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "Could not read the CrateDB volume in context '$Context': $pvc" }
+        if ($pvc -and -not $AssumeFreshVolume) {
+            throw ("There is no CrateDB StatefulSet in '$Context', but the volume data-cratedb-0 still exists and holds data of an unknown version. " +
+                "Applying a manifest that is older than that data makes CrateDB crash-loop. Start the version that wrote the data first, or pass " +
+                "-AssumeFreshVolume if the volume is empty or you accept that. Deleting the volume (kubectl delete pvc data-cratedb-0) also deletes the upgrade snapshots.")
+        }
         Write-Host "CrateDB: no existing installation in '$Context', installing $target." -ForegroundColor Cyan
         & $apply $ManifestPath
         return [pscustomobject]@{ Action = 'Install'; From = $null; To = $target; Steps = @($target); Snapshot = $null }
@@ -252,6 +288,9 @@ Update-OctoCrateDb -Context kind-kind -ManifestPath ./kubernetes/infra/cratedb.y
 
     $plan = Get-CrateUpgradePlan -Running $running -Target $target
     switch ($plan.Action) {
+        'Unsupported' {
+            throw "No tested upgrade path from CrateDB $running to $target (supported: 5.x and 6.x). The manifest was NOT applied; extend Get-CrateUpgradePlan with a tested path first."
+        }
         'Refuse' {
             throw ("CrateDB in '$Context' runs $running, the manifest pins the older $target. CrateDB cannot be downgraded, " +
                 "the manifest was NOT applied. Update this repository (git pull) so that the manifest pins $running or newer.")
@@ -281,7 +320,7 @@ Update-OctoCrateDb -Context kind-kind -ManifestPath ./kubernetes/infra/cratedb.y
         }
         else {
             $msg = "Not enough free disk space for the pre-upgrade snapshot ($detail)."
-            if ($NonInteractive -or [Console]::IsInputRedirected) {
+            if ($NonInteractive -or [Console]::IsInputRedirected -or -not [Environment]::UserInteractive) {
                 throw "$msg Free up space or pass -SkipSnapshot to upgrade without a snapshot. Nothing was upgraded."
             }
             Write-Host $msg -ForegroundColor Yellow
@@ -292,6 +331,7 @@ Update-OctoCrateDb -Context kind-kind -ManifestPath ./kubernetes/infra/cratedb.y
     }
 
     $manifestText = Get-Content $ManifestPath -Raw
+    $rowWarnings = [System.Collections.Generic.List[string]]::new()
     foreach ($step in $plan.Steps) {
         Write-Host "CrateDB: step to $step..." -ForegroundColor Cyan
         if ($step -eq $target) {
@@ -306,22 +346,34 @@ Update-OctoCrateDb -Context kind-kind -ManifestPath ./kubernetes/infra/cratedb.y
             }
             finally { Remove-Item $stepFile -Force -ErrorAction SilentlyContinue }
         }
-        & kubectl --context $Context -n $Namespace rollout status statefulset/cratedb --timeout=600s
+        & kubectl --context $Context -n $Namespace rollout status statefulset/cratedb --timeout=600s | Out-Host
         if ($LASTEXITCODE -ne 0) { throw ("CrateDB did not roll out $step. The data may already be opened by $step - do not apply an older manifest." + $(if ($snapshot) { " Snapshot: $snapshot" })) }
         Wait-CrateHealthy -Context $Context -Namespace $Namespace -ExpectedVersion $step
         $after = Get-CrateTableCounts -Context $Context -Namespace $Namespace
+        # The step itself is done at this point (version up, all GREEN). Running services may legitimately write,
+        # delete or drop tables meanwhile, so differences are reported loudly but do not abort the chain; the
+        # snapshot (if taken) is the reference. The probe schemas of the S3 checks are not user data.
+        $diffs = [System.Collections.Generic.List[string]]::new()
         foreach ($table in $before.Keys) {
-            if (-not $after.Contains($table)) { throw "Table $table is missing after the step to $step." }
-            if ($after[$table] -lt $before[$table]) { throw "Table $table lost rows in the step to $step ($($before[$table]) -> $($after[$table]))." }
-            if ($after[$table] -gt $before[$table]) { Write-Warning "Table ${table}: $($after[$table] - $before[$table]) row(s) more than before (written during the upgrade)." }
+            if ($table -match '^octo(_tools)?_check\.') { continue }
+            if (-not $after.Contains($table)) { $diffs.Add("$table is gone ($($before[$table]) rows before)") }
+            elseif ($after[$table] -lt $before[$table]) { $diffs.Add("$table has fewer rows ($($before[$table]) -> $($after[$table]))") }
+            elseif ($after[$table] -gt $before[$table]) { Write-Host "CrateDB: $table has $($after[$table] - $before[$table]) more row(s) (written during the upgrade)." }
         }
-        Write-Host "CrateDB: $step is up, all tables GREEN, row counts match ($($after.Count) table(s))." -ForegroundColor Green
+        if ($diffs.Count -eq 0) {
+            Write-Host "CrateDB: $step is up, all tables GREEN, row counts match ($($after.Count) table(s))." -ForegroundColor Green
+        }
+        else {
+            foreach ($d in $diffs) { $rowWarnings.Add("step ${step}: $d") }
+            Write-Warning ("CrateDB: the step to $step completed (version up, all tables GREEN), but the row counts differ: $($diffs -join '; '). " +
+                "If a running service deleted or dropped them this is expected; otherwise compare with the snapshot" + $(if ($snapshot) { " $snapshot" } else { " (none was taken)" }) + ".")
+        }
     }
-    return [pscustomobject]@{ Action = 'Upgrade'; From = $running; To = $target; Steps = $plan.Steps; Snapshot = $snapshot }
+    return [pscustomobject]@{ Action = 'Upgrade'; From = $running; To = $target; Steps = $plan.Steps; Snapshot = $snapshot; RowCountWarnings = @($rowWarnings) }
 }
 
 # Dot-sourcing (tests) only defines the functions.
 if ($MyInvocation.InvocationName -ne '.') {
     $null = Update-OctoCrateDb -Context $Context -ManifestPath $ManifestPath -Namespace $Namespace `
-        -SkipSnapshot:$SkipSnapshot -NonInteractive:$NonInteractive
+        -SkipSnapshot:$SkipSnapshot -NonInteractive:$NonInteractive -AssumeFreshVolume:$AssumeFreshVolume
 }
