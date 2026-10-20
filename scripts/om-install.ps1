@@ -19,7 +19,14 @@ param(
     [switch]$SkipS3Store = $false,
     # The MCP server (octo-mesh-mcp) is part of every profile; this skips it, e.g. to save memory.
     [Parameter()]
-    [switch]$SkipMcp = $false
+    [switch]$SkipMcp = $false,
+    # Upgrades an existing CrateDB without the snapshot that is normally taken first (see
+    # om-upgrade-cratedb.ps1), e.g. when the disk is too small for it.
+    [Parameter()]
+    [switch]$SkipCrateDbSnapshot = $false,
+    # A CrateDB volume without a StatefulSet is refused (its data may be newer than the manifest); this treats it as empty.
+    [Parameter()]
+    [switch]$AssumeFreshCrateDbVolume = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -316,8 +323,12 @@ function Install-Infrastructure {
 
     kubectl --context $KubeContext apply -f (Join-Path $KubernetesPath "infra/rabbitmq.yaml")
     if ($LASTEXITCODE -ne 0) { throw "kubectl apply of infra/rabbitmq.yaml failed." }
-    kubectl --context $KubeContext apply -f (Join-Path $KubernetesPath "infra/cratedb.yaml")
-    if ($LASTEXITCODE -ne 0) { throw "kubectl apply of infra/cratedb.yaml failed." }
+    # Not a plain apply: an existing CrateDB data volume is upgraded step by step (snapshot first,
+    # 5.9 -> 6.x via 5.10.16) and never downgraded. A fresh install is just the apply.
+    & (Join-Path $PSScriptRoot "om-upgrade-cratedb.ps1") -Context $KubeContext `
+        -ManifestPath (Join-Path $KubernetesPath "infra/cratedb.yaml") `
+        -SkipSnapshot:$SkipCrateDbSnapshot -NonInteractive:$NonInteractive `
+        -AssumeFreshVolume:$AssumeFreshCrateDbVolume
     kubectl --context $KubeContext apply -f (Join-Path $KubernetesPath "infra/mongodb.yaml")
     if ($LASTEXITCODE -ne 0) { throw "kubectl apply of infra/mongodb.yaml failed." }
 

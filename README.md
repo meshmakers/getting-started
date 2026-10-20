@@ -132,6 +132,76 @@ trust store unless you used `-SkipTrustCa`. Clients that run on Node.js can be p
                      # (keeps local-config.json with the selected version)
 ```
 
+## Upgrading CrateDB
+
+CrateDB runs as one pod with a persistent volume. A newer CrateDB cannot be undone: data that a newer version
+has opened does not start under an older one. That is why `om-install.ps1` does not simply apply the CrateDB
+manifest over an existing installation but runs `om-upgrade-cratedb.ps1` first (you can also run it on its
+own; it needs the kube context of the cluster and nothing from octo-tools):
+
+```pwsh
+./om-upgrade-cratedb.ps1 -Context kind-octomesh
+```
+
+| What it finds | What it does |
+|---|---|
+| No CrateDB yet | installs the version of `scripts/kubernetes/infra/cratedb.yaml` |
+| Same version as the manifest | nothing to upgrade |
+| A **newer** version than the manifest (for example an old checkout over upgraded data) | stops with an error and changes nothing. `git pull` and run again |
+| An older version | checks the free disk space, takes a snapshot, then upgrades step by step |
+
+The snapshot goes into the cluster's own backup repository (`/data/backup` in the CrateDB volume, repository
+`upgrade_<timestamp>`, snapshot `pre_upgrade`) and holds the data of the version you came from. CrateDB 6 can only be reached
+from 5.10.1 or later, so a 5.9 volume is upgraded to 5.10.16 first and then to 6.x. After every step the script
+waits until CrateDB runs the new version and every table is GREEN, and it compares the row count of each
+table with the count before the upgrade; a table with fewer rows, or a table that is gone, is reported as a warning that names it (the upgrade continues, the snapshot is the reference).
+
+If a CrateDB volume exists but its StatefulSet is gone (after `kubectl delete sts`), the script refuses to continue, because the data may be newer than the manifest: start the version that wrote the data, or pass `-AssumeFreshVolume` (`-AssumeFreshCrateDbVolume` to `om-install.ps1`) if the volume is empty. It only works on a local kind cluster (context `kind-…` with kind nodes). Differences in the row counts after a step (a service wrote or dropped data meanwhile) are reported as a warning that names the tables.
+
+If the volume has too little free space for the snapshot, the script asks before it goes on. To upgrade without a
+snapshot on purpose, pass `-SkipSnapshot` (`-SkipCrateDbSnapshot` to `om-install.ps1`). There is no way back from an
+upgrade other than restoring the snapshot into a new CrateDB of the old version, so only skip the snapshot when the data
+does not matter.
+
+#### Going back: restore the snapshot
+
+An upgrade cannot be undone in place, but the pre-upgrade snapshot lets you return to the old version. **The snapshot
+lives in the same volume as the data (`/data/backup` inside `data-cratedb-0`): deleting the volume
+(`kubectl delete pvc data-cratedb-0`, or deleting the cluster) deletes the snapshot with it.** Copy it out first if it
+matters. The script prints the snapshot location and the old version when it takes the snapshot
+(`CrateDB: snapshot upgrade_<timestamp>.pre_upgrade (/data/backup/upgrade-<timestamp>-from-<old version>, CrateDB <old version>)`).
+
+```pwsh
+$ctx = "kind-octomesh"; $old = "5.9.10"          # the version from the snapshot line
+kubectl --context $ctx -n octo-infra scale statefulset cratedb --replicas=0
+# remove the data the newer version has opened, keep /data/backup (the snapshot):
+@"
+apiVersion: v1
+kind: Pod
+metadata: { name: cratedb-wipe, namespace: octo-infra }
+spec:
+  restartPolicy: Never
+  containers:
+    - name: wipe
+      image: busybox:1.36
+      command: ["sh", "-c", "rm -rf /data/data && ls /data"]
+      volumeMounts: [{ name: data, mountPath: /data }]
+  volumes:
+    - { name: data, persistentVolumeClaim: { claimName: data-cratedb-0 } }
+"@ | kubectl --context $ctx apply -f -
+kubectl --context $ctx -n octo-infra wait --for=jsonpath='{.status.phase}'=Succeeded pod/cratedb-wipe --timeout=120s
+kubectl --context $ctx -n octo-infra delete pod cratedb-wipe
+# start the OLD version on the now empty data directory:
+kubectl --context $ctx -n octo-infra set image statefulset/cratedb cratedb=crate:$old
+kubectl --context $ctx -n octo-infra scale statefulset cratedb --replicas=1
+kubectl --context $ctx -n octo-infra rollout status statefulset/cratedb
+# register the snapshot directory and restore everything:
+kubectl --context $ctx -n octo-infra exec cratedb-0 -c cratedb -- crash -c "CREATE REPOSITORY restore_repo TYPE fs WITH (location='/data/backup/upgrade-<timestamp>-from-$old')"
+kubectl --context $ctx -n octo-infra exec cratedb-0 -c cratedb -- crash -c "RESTORE SNAPSHOT restore_repo.pre_upgrade ALL WITH (wait_for_completion = true)"
+```
+
+The restore was verified on a throwaway kind cluster (5.9.10 snapshot, 6.4.6 data: counts and GREEN as before). Afterwards the next `om-install.ps1` upgrades again, because the manifest pins 6.4.6; to stay on the old version use a checkout whose `scripts/kubernetes/infra/cratedb.yaml` pins it.
+
 ## Troubleshooting
 
 * **`*.127-0-0-1.nip.io` does not resolve** — some routers/corporate DNS servers

@@ -42,7 +42,7 @@ spec:
           securityContext: { privileged: true }
       containers:
         - name: cratedb
-          image: crate:5.10.10
+          image: crate:6.4.6
           args:
             - "crate"
             - "-Cdiscovery.type=single-node"
