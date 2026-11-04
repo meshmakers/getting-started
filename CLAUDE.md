@@ -127,4 +127,4 @@ Pester tests of the re-run behaviour (fake octo-cli/kubectl, no stack needed):
   than 3.4.51 are amd64-only. octo-cli minimum version is 3.5.0.
 * Dev-grade default credentials are intentional (quickstart), but nothing generated
   or secret may be committed.
-* All artifacts in English. Commit format: `AB#<n> <New/Fix>: <description>`.
+* All artifacts in English. Commit and PR title format: `AB#<n> <Type>: <description>`, type one of `Fix`, `New`, `Chore`, `Refactor`, `Test`, `Docs`.
